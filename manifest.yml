@@ -1,0 +1,17 @@
+---
+name: "BioPB Image Browser"
+category: "Interactive Apps"
+subcategory: "Visualization"
+role: "batch_connect"
+icon: "fa://microscope"
+description: |
+  Browse microscopy data stored on the cluster in your web browser.
+
+  Starts the full BioPB stack (control plane + Arrow Flight data plane + web UI)
+  on a compute node. The data plane transcodes your images on demand into a
+  multi-resolution pyramid, so whole-slide and larger-than-memory datasets open
+  without any staging or import step. Reads formats including OME-Zarr,
+  OME-TIFF, CZI, ND2, LIF, NDTiff, DICOM and NIfTI directly from disk.
+
+  The browser UI is reached over an SSH tunnel — the session card gives you the
+  exact command to copy.

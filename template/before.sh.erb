@@ -1,0 +1,62 @@
+# Allocate the ports and the access token for this session.
+#
+# BioPB runs three listeners and derives them from one base port, the same
+# convention the container uses (BIOPB_BASE_PORT):
+#
+#   base + 3  control plane  — the browser origin: serves the web UI, proxies
+#                              the rest. This is the port you tunnel to.
+#   base + 4  HTTP sidecar   — the data-plane REST/WS API the UI calls
+#   base + 5  Arrow Flight   — the gRPC data plane (SDK clients, napari)
+#
+# Allocating a *contiguous* base rather than three loose ports means this app
+# drives either biopb CLI generation unchanged: the 0.12.0 release takes
+# BIOPB_CONTROL_PORT + --web-port, while newer builds take a single --base-port.
+# See template/script.sh.erb.
+#
+# All three bind 127.0.0.1 on the compute node. The control plane is plaintext
+# HTTP and has no TLS support, so publishing it would put the access token on
+# the wire in the clear (biopb/biopb#614). It stays on loopback and the browser
+# reaches it through the SSH tunnel shown on the session card.
+
+# Find a base port whose +3/+4/+5 offsets are all free. find_port already
+# returns something unused, so this only has to clear the three derived ports.
+find_base_port () {
+  local h="$1" b attempt
+  for attempt in $(seq 1 64); do
+    b="$(find_port "${h}" 9000 60000)"
+    if ! port_used "${h}:$((b + 3))" \
+       && ! port_used "${h}:$((b + 4))" \
+       && ! port_used "${h}:$((b + 5))"; then
+      echo "${b}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+base_port="$(find_base_port "${host}")" || {
+  echo "ERROR: could not find three consecutive free ports on ${host}" >&2
+  exit 1
+}
+
+export base_port
+export control_port=$((base_port + 3))
+export sidecar_port=$((base_port + 4))
+export grpc_port=$((base_port + 5))
+
+# OnDemand's canonical connection port. The control plane is the only listener a
+# human ever talks to, so that is what the session card tunnels to.
+export port="${control_port}"
+
+# Gates the web UI and the data API. Alphanumeric from create_passwd, which
+# satisfies biopb's 16-128 URL-safe character rule. A token matters even on a
+# loopback bind here: compute nodes are shared, so without one any other user on
+# this node could reach the data API over 127.0.0.1.
+export biopb_token="$(create_passwd 32)"
+
+# Copied into connection.yml for the session card (see submit.yml.erb). The
+# username is resolved here rather than in the view, so the card does not depend
+# on a dashboard helper being in scope when it renders.
+export login_host="<%= login_host %>"
+export data_dir="<%= user_data_dir %>"
+export ood_user="${USER:-$(id -un)}"

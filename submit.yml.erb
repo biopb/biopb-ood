@@ -1,0 +1,25 @@
+---
+# `bc_num_hours` from the form is turned into the job's wall time by OnDemand
+# itself, so it is not repeated in `native` below.
+batch_connect:
+  template: "basic"
+  # Extra variables copied out of the job environment into connection.yml so
+  # view.html.erb can render them. `host` and `port` are always included; these
+  # are the ones this app adds. Every name here must be exported by
+  # template/before.sh.erb.
+  conn_params:
+    - biopb_token
+    - login_host
+    - data_dir
+    - sidecar_port
+    - grpc_port
+    - ood_user
+
+script:
+  job_name: "biopb-browser"
+  native:
+    - "--qos=general"
+    - "--nodes=1"
+    - "--ntasks=1"
+    - "--cpus-per-task=<%= num_cores %>"
+    - "--mem=<%= memory_gb %>G"

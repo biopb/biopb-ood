@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+#
+# Launch the BioPB stack for one OnDemand session.
+#
+# `biopb control run` is the whole deployment in one foreground process: it
+# serves the web UI, supervises the Arrow Flight data plane as a child, and
+# reverse-proxies that child's HTTP sidecar under /data_plane. It is the ONLY
+# component that serves the browser bundle — the tensor server's sidecar carries
+# no static assets, and neither does the biopb-tensor-server container image,
+# which is a headless Flight-only data plane. That is why this app runs the full
+# stack from the shared home install rather than the .sif.
+
+set -euo pipefail
+
+export PATH="${HOME}/.local/bin:${PATH}"
+
+STAGED_ROOT="${PWD}"
+CONFIG_FILE="${STAGED_ROOT}/biopb.json"
+
+# Per-session state (logs, pid files, session registry). Without this, two
+# concurrent sessions would fight over ~/.local/state/biopb.
+export XDG_STATE_HOME="${STAGED_ROOT}/state"
+mkdir -p "${XDG_STATE_HOME}"
+
+# The transcode cache goes on node-local disk, not NFS home: it is written
+# constantly, it is worthless after the job ends, and the file backend takes a
+# cross-process lock that two sessions sharing a directory would contend on.
+CACHE_DIR="${TMPDIR:-/tmp}/biopb-ood-${SLURM_JOB_ID:-$$}/cache"
+mkdir -p "${CACHE_DIR}"
+cleanup () { rm -rf "${TMPDIR:-/tmp}/biopb-ood-${SLURM_JOB_ID:-$$}" 2>/dev/null || true; }
+trap cleanup EXIT
+
+# Java is only needed for the Bio-Formats fallback readers (.zvi, .ims, .oif).
+# Everything else is native Python, so a missing module is not fatal.
+if command -v module >/dev/null 2>&1; then
+  module load java/21.0.2 >/dev/null 2>&1 || true
+fi
+
+if ! command -v biopb >/dev/null 2>&1; then
+  echo "ERROR: 'biopb' not found on PATH." >&2
+  echo "Install it with:  curl -fsSL https://biopb.org/install.sh | bash" >&2
+  exit 1
+fi
+
+WEBAPP_DIR="${HOME}/.local/share/biopb/webapp"
+if [[ ! -f "${WEBAPP_DIR}/index.html" ]]; then
+  echo "ERROR: the web UI bundle is missing at ${WEBAPP_DIR}." >&2
+  echo "Re-run the biopb installer to restore it." >&2
+  exit 1
+fi
+
+# `server.port` is how the released control tells its data-plane child which
+# Flight port to bind; newer builds pass it explicitly and ignore this. Setting
+# it is correct either way.
+cat > "${CONFIG_FILE}" <<JSON
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": ${grpc_port},
+    "aggressive_dir_pruning": true
+  },
+  "cache": {
+    "backend": "file",
+    "file_cache_dir": "${CACHE_DIR}",
+    "file_max_total_gb": <%= cache_gb %>
+  },
+  "sources": [
+    {
+      "url": "<%= user_data_dir %>",
+      "monitor": <%= monitor_sources %>
+    }
+  ]
+}
+JSON
+
+echo "BioPB session starting on $(hostname)"
+echo "  data directory : <%= user_data_dir %>"
+echo "  control (UI)   : 127.0.0.1:${control_port}"
+echo "  HTTP sidecar   : 127.0.0.1:${sidecar_port}"
+echo "  Arrow Flight   : 127.0.0.1:${grpc_port}"
+
+# Two CLI generations in the wild. The 0.12.0 release takes the control port
+# from BIOPB_CONTROL_PORT and the sidecar port from --web-port; builds carrying
+# biopb/biopb#614 replaced both with a single --base-port. Pick whichever this
+# install actually offers so the app survives a biopb upgrade.
+if biopb control run --help 2>/dev/null | grep -q -- '--base-port'; then
+  echo "  (using --base-port interface)"
+  set -- --base-port "${base_port}" --grpc-bind 127.0.0.1 --no-tls
+else
+  echo "  (using BIOPB_CONTROL_PORT + --web-port interface)"
+  export BIOPB_CONTROL_PORT="${control_port}"
+  set -- --web-port "${sidecar_port}"
+fi
+
+export BIOPB_TENSOR_TOKEN="${biopb_token}"
+
+biopb control run \
+  --config "${CONFIG_FILE}" \
+  --static-dir "${WEBAPP_DIR}" \
+  --log-level INFO \
+  "$@" &
+CONTROL_PID=$!
+
+# Wait for the browser origin to be serving before declaring the session ready.
+#
+# The gate is HTTP 200 on /data_plane/readyz — the sidecar's health probe, which
+# lives at the sidecar ROOT (not under /api/*) and reaches it through the
+# control's prefix-stripping /data_plane mount. Do NOT gate on the control's own
+# data_plane.state=="serving": that reflects a TCP probe of the Flight port,
+# which comes up about two seconds before the sidecar binds, so the UI would
+# still 502. Do not require the body's "ready":true either — the sidecar answers
+# before it has connected to Flight, so it reports "degraded"/source_count 0 for
+# a moment on a perfectly healthy start.
+echo -n "Waiting for the data plane"
+READY=0
+for _ in $(seq 1 150); do
+  if ! kill -0 "${CONTROL_PID}" 2>/dev/null; then
+    echo
+    echo "ERROR: the control plane exited during startup." >&2
+    wait "${CONTROL_PID}" || true
+    exit 1
+  fi
+  code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 \
+      -H "Authorization: Bearer ${biopb_token}" \
+      "http://127.0.0.1:${control_port}/data_plane/readyz" 2>/dev/null || true)"
+  if [[ "${code}" == "200" ]]; then
+    READY=1
+    break
+  fi
+  sleep 2
+  echo -n "."
+done
+echo
+
+if [[ "${READY}" == "1" ]]; then
+  echo "BioPB is ready. Open the session card for the SSH tunnel command."
+else
+  echo "WARNING: the data plane did not report ready in time; leaving the" >&2
+  echo "         session up anyway so you can inspect the log above." >&2
+fi
+
+wait "${CONTROL_PID}"

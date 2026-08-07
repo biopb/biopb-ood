@@ -1,0 +1,90 @@
+---
+# Rendered through ERB by the OnDemand dashboard, so <%= %> works here.
+#
+# The cluster list is built from whatever OnDemand has configured in
+# /etc/ood/config/clusters.d rather than hard-coded, so this app does not have to
+# know the site's cluster id. If your site has exactly one cluster and you would
+# rather not show the menu, delete `cluster` from the `form:` list below and add
+# a top-level `cluster: "<your-cluster-id>"` key instead.
+cluster:
+  <%- OodAppkit.clusters.select(&:job_allow?).sort_by(&:id).each do |c| -%>
+  - "<%= c.id %>"
+  <%- end -%>
+
+attributes:
+  user_data_dir:
+    label: "Data directory"
+    widget: "path_selector"
+    directory: "<%= CurrentUser.home %>"
+    show_files: false
+    help: |
+      The folder BioPB will index and serve. Everything under it is scanned
+      recursively. Point it at the parent of your image folders — no staging,
+      conversion or import step is needed; files stay in their original format.
+
+  bc_num_hours:
+    label: "Hours"
+    value: "4"
+    min: 1
+    max: 168
+    help: "How long the session should stay alive before Slurm reclaims it."
+
+  num_cores:
+    label: "CPU cores"
+    widget: "number_field"
+    value: "8"
+    min: 2
+    max: 48
+    step: 1
+    help: |
+      Cores for transcoding and cache work. 8 is a good default; raise it for
+      large whole-slide images or many simultaneous viewers.
+
+  memory_gb:
+    label: "Memory (GB)"
+    widget: "number_field"
+    value: "24"
+    min: 4
+    max: 512
+    step: 4
+    help: "Total RAM for the session. Large 3-D or whole-slide images want more."
+
+  cache_gb:
+    label: "Disk cache (GB)"
+    widget: "number_field"
+    value: "64"
+    min: 1
+    max: 2048
+    step: 1
+    help: |
+      On-demand transcoded chunks are cached on disk so revisiting an image is
+      fast. The cache is per-session and is deleted when the session ends.
+
+  monitor_sources:
+    label: "Watch the data directory for changes"
+    widget: "select"
+    value: "false"
+    options:
+      - ["No  — index once at startup (recommended)", "false"]
+      - ["Yes — re-scan continuously for new files", "true"]
+    help: |
+      Live monitoring polls the filesystem. On a large or slow shared filesystem
+      that costs real I/O, so leave it off unless you are actively writing new
+      data into this folder during the session.
+
+  login_host:
+    label: "SSH login host"
+    value: "mantis-submit.cam.uchc.edu"
+    help: |
+      The host you normally SSH into from off-campus. Used only to build the
+      tunnel command shown on the session card.
+
+form:
+  - cluster
+  - user_data_dir
+  - bc_num_hours
+  - num_cores
+  - memory_gb
+  - cache_gb
+  - monitor_sources
+  - login_host
