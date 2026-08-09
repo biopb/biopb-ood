@@ -73,42 +73,30 @@ output. The tunnel branch, whose control stays on loopback, keeps it.
 
 ## Requirements
 
-The full stack must be installed in your home directory — the container image
-(`jiyuuchc/biopb-tensor-server`) is a **headless Flight-only data plane** and
-carries no web front end, so it cannot serve this UI.
+**[INSTALL.md](INSTALL.md) is the step-by-step guide**, single-user and
+site-wide taken separately. In short:
 
-This branch needs a build carrying biopb/biopb#731, which is on biopb's `dev`
-branch and **not in any release** — so the released installer is not enough here:
+- A biopb carrying **biopb/biopb#731**, which is on biopb's `dev` branch and
+  **not in any release** — so this branch has to be built from source. Both
+  halves, the CLI and the web bundle, must come from the same tree: a new CLI
+  with an old bundle starts cleanly and then serves a blank page.
+- The container image (`jiyuuchc/biopb-tensor-server`) cannot serve this UI. It
+  is a headless Flight-only data plane with no web front end.
+- Slurm, and a home directory the compute nodes can see.
 
-| Path | What |
-|---|---|
-| `~/.local/bin/biopb` | CLI whose `control run --help` lists `--url-prefix` |
-| `~/.local/share/biopb/webapp/index.html` | a bundle built from the same tree, so it reads `window.__BIOPB_BASE__` |
+`script.sh.erb` checks for `--url-prefix` before launching and checks the served
+document for its `<base href>` afterwards, so either half being wrong is reported
+in the job output rather than guessed at.
 
-Both halves have to come from the same source. A new CLI with an old bundle
-starts cleanly and then serves a blank page; `script.sh.erb` checks for the flag
-before launching and checks the served document for its `<base href>` afterwards,
-so either mismatch is reported in the job output instead of guessed at.
-
-Once #731 is released, `curl -fsSL https://biopb.org/install.sh | bash` covers
-both and this note can go.
-
-Until then, both halves can be pointed at a build tree without installing over
-`~/.local` — set these in the job environment (or in `script.sh.erb`):
-
-```sh
-BIOPB_BIN_DIR=/path/to/tree/.venv/bin
-BIOPB_WEBAPP_DIR=/path/to/tree/web/packages/app/dist
-```
-
-Unset, they default to the installer's locations and the app behaves normally.
-
-Home is shared with the compute nodes, so one install covers every session.
+`BIOPB_BIN_DIR` and `BIOPB_WEBAPP_DIR` point the app at a build tree; unset, they
+default to the installer's locations under `~/.local` and the app behaves
+normally.
 
 ## Files
 
 | File | Role |
 |---|---|
+| `INSTALL.md` | how to deploy it, single-user and site-wide |
 | `manifest.yml` | app name, category, icon |
 | `form.yml` | the launch form (ERB-rendered) |
 | `submit.yml.erb` | Slurm resources + which vars reach `view.html.erb` |
