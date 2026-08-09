@@ -148,9 +148,9 @@ Four values are site-dependent. The first two can actually break the app.
    `/node/$host/$port`.
 2. `script.sh.erb` writes a per-session `biopb.json`, points the transcode cache
    at node-local `/tmp` (not NFS home — it is write-heavy, disposable, and the
-   file backend takes a cross-process lock), sets a per-session `XDG_STATE_HOME`
-   so concurrent sessions do not collide, and runs `biopb control run` with
-   `--url-prefix` and a `0.0.0.0` control bind.
+   file backend takes a cross-process lock), gives the session its own XDG tree
+   (below), and runs `biopb control run` with `--url-prefix` and a `0.0.0.0`
+   control bind.
 3. It waits for **HTTP 200 on `/data_plane/readyz`**, then confirms the document
    served at the prefix actually carries a `<base href>` — a CLI new enough to
    accept the flag paired with an older web bundle would otherwise come up blank.
@@ -174,13 +174,38 @@ Gate on HTTP 200 from `/data_plane/readyz`, and nothing else:
 A cold start on a small dataset is ~8 seconds. Indexing a large tree keeps going
 in the background; the UI shows "Indexing…" and fills in as it scans.
 
-## Ports and multi-tenancy
+## Isolation and multi-tenancy
 
 Ports are allocated per session, so several sessions can share a compute node.
-Each also gets its own state directory and its own cache directory. The access
-token is what keeps one session's data out of another's reach: the control port
-is open on the node's interfaces, and the sidecar and Flight ports — though
-loopback-only — are reachable by every other user logged in to the same node.
+The access token is what keeps one session's data out of another's reach: the
+control port is open on the node's interfaces, and the sidecar and Flight ports
+— though loopback-only — are reachable by every other user logged in to the same
+node.
+
+Each session also gets its own copy of every directory biopb resolves at run
+time. biopb honours exactly three XDG base dirs (`biopb/_locations.py`), and all
+three are redirected into the staged job directory:
+
+| | holds | why per-session |
+|---|---|---|
+| `XDG_STATE_HOME` | logs, pid, credential, session registry, the control's discovery record | two sessions would otherwise overwrite each other's credential and fight over one log |
+| `XDG_CONFIG_HOME` | `biopb.json`, `mcp-config.json` | a stale `~/.config/biopb` — a legacy `biopb.toml`, say — can no longer change how a session behaves |
+| `XDG_DATA_HOME` | webapp / samples lookups | a user's leftover `~/.local/share/biopb/webapp` cannot shadow the bundle the site chose |
+
+`XDG_CACHE_HOME` is redirected too, to node-local disk. biopb does not read it;
+the scientific stack underneath does, and those caches otherwise land in NFS home
+and get written by every concurrent session on the cluster at once.
+
+The install locations are resolved *before* these take effect, so a site that
+ships biopb as a module — setting `XDG_DATA_HOME` itself — still gets its own
+bundle. What the overrides neutralize is biopb's implicit fallbacks; every path
+this app depends on is passed explicitly (`--config`, `--static-dir`).
+
+Two consequences worth knowing. Anything the UI writes through the admin pages
+(the MCP config) lands in the session directory and goes away with the session —
+it is not persistent user configuration. And the session ignores whatever biopb
+config the user keeps in their home; the data directory comes from the launch
+form and nowhere else.
 
 ## Using the data from Python, Java or napari
 

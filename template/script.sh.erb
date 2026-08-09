@@ -12,26 +12,58 @@
 
 set -euo pipefail
 
-# Normally the installer's bin dir. Overridable for the same reason as
-# BIOPB_WEBAPP_DIR below: this branch needs an unreleased biopb, and the CLI and
-# the web bundle must come from the *same* tree. Point both at a build tree to
-# run one, and leave both unset for an ordinary install.
-export PATH="${BIOPB_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
-
 STAGED_ROOT="${PWD}"
 CONFIG_FILE="${STAGED_ROOT}/biopb.json"
 
-# Per-session state (logs, pid files, session registry). Without this, two
-# concurrent sessions would fight over ~/.local/state/biopb.
-export XDG_STATE_HOME="${STAGED_ROOT}/state"
-mkdir -p "${XDG_STATE_HOME}"
+# --- where the install lives ---------------------------------------------- #
+#
+# Resolved from the environment as the *launching user* has it, and resolved
+# HERE, before the per-session XDG overrides below repoint the very variables
+# this reads. A site that ships biopb as a module may well set XDG_DATA_HOME, and
+# that has to keep pointing at the module's bundle.
+#
+# Both are overridable for the same reason: this branch needs an unreleased biopb
+# (biopb/biopb#731), so the CLI and the bundle may come from a build tree rather
+# than ~/.local — and they must come from the *same* tree.
+BIOPB_BIN_DIR="${BIOPB_BIN_DIR:-${HOME}/.local/bin}"
+WEBAPP_DIR="${BIOPB_WEBAPP_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/biopb/webapp}"
+export PATH="${BIOPB_BIN_DIR}:${PATH}"
+
+# --- the session's own XDG surface ---------------------------------------- #
+#
+# biopb honours exactly three XDG base dirs and resolves them at call time
+# (`biopb/_locations.py`): config, state, data. Giving the session its own has
+# two payoffs, and the second is what multi-user deployment needs:
+#
+#   1. Two concurrent sessions cannot collide — they would otherwise share one
+#      ~/.local/state/biopb for logs, the pid file, the credential, the session
+#      registry and the control's discovery record.
+#   2. A session's behaviour stops depending on whatever is in the launching
+#      user's home, and it writes nothing back there. One user's stale
+#      ~/.config/biopb (a legacy biopb.toml, say) can no longer change how their
+#      session behaves, and no user's leftover ~/.local/share/biopb/webapp can
+#      shadow the bundle the site chose above.
+#
+# The site's explicit choices still win: every path this app actually depends on
+# is passed on the command line (--config, --static-dir) or captured above,
+# before these take effect. What the overrides neutralize is biopb's *implicit*
+# fallbacks — which is the point.
+export XDG_STATE_HOME="${STAGED_ROOT}/state"    # logs, pid, credential, sessions
+export XDG_CONFIG_HOME="${STAGED_ROOT}/config"  # biopb.json, mcp-config.json
+export XDG_DATA_HOME="${STAGED_ROOT}/data"      # webapp / samples lookups
+mkdir -p "${XDG_STATE_HOME}" "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}"
 
 # The transcode cache goes on node-local disk, not NFS home: it is written
 # constantly, it is worthless after the job ends, and the file backend takes a
 # cross-process lock that two sessions sharing a directory would contend on.
-CACHE_DIR="${TMPDIR:-/tmp}/biopb-ood-${SLURM_JOB_ID:-$$}/cache"
-mkdir -p "${CACHE_DIR}"
-cleanup () { rm -rf "${TMPDIR:-/tmp}/biopb-ood-${SLURM_JOB_ID:-$$}" 2>/dev/null || true; }
+SESSION_TMP="${TMPDIR:-/tmp}/biopb-ood-${SLURM_JOB_ID:-$$}"
+CACHE_DIR="${SESSION_TMP}/cache"
+# biopb itself does not read XDG_CACHE_HOME — this is for the scientific stack
+# underneath it (font/JIT/plugin caches), which otherwise lands in NFS home and
+# is written by every concurrent session on the cluster at once.
+export XDG_CACHE_HOME="${SESSION_TMP}/xdg-cache"
+mkdir -p "${CACHE_DIR}" "${XDG_CACHE_HOME}"
+cleanup () { rm -rf "${SESSION_TMP}" 2>/dev/null || true; }
 trap cleanup EXIT
 
 # Java is only needed for the Bio-Formats fallback readers (.zvi, .ims, .oif).
@@ -46,10 +78,6 @@ if ! command -v biopb >/dev/null 2>&1; then
   exit 1
 fi
 
-# Normally the installer's bundle. Overridable because this branch requires an
-# unreleased biopb (biopb/biopb#731), so the CLI and the bundle may well come from
-# a build tree rather than ~/.local — and they have to come from the same one.
-WEBAPP_DIR="${BIOPB_WEBAPP_DIR:-${HOME}/.local/share/biopb/webapp}"
 if [[ ! -f "${WEBAPP_DIR}/index.html" ]]; then
   echo "ERROR: the web UI bundle is missing at ${WEBAPP_DIR}." >&2
   echo "Re-run the biopb installer to restore it." >&2
