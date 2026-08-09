@@ -72,6 +72,18 @@ attributes:
       that costs real I/O, so leave it off unless you are actively writing new
       data into this folder during the session.
 
+  qos:
+    label: "QOS"
+    value: "general"
+    help: |
+      Slurm quality-of-service for the job. Leave it blank to let Slurm apply
+      your account's default — no `--qos` is passed then.
+
+      On this cluster: `general` (the default, 21-day limit), `himem`,
+      `interactive`, `debug`, `preemptible`. `sacctmgr show assoc user=$USER
+      format=QOS` lists the ones your account may actually use; a QOS you are
+      not entitled to is rejected at submit time.
+
   login_host:
     label: "SSH login host"
     value: "mantis-submit.cam.uchc.edu"
@@ -87,4 +99,5 @@ form:
   - memory_gb
   - cache_gb
   - monitor_sources
+  - qos
   - login_host

@@ -133,8 +133,10 @@ Four values are site-dependent. The first two can actually break the app.
 - **Cluster** — `form.yml` builds the list from `OodAppkit.clusters`, so it adapts
   to whatever is in `/etc/ood/config/clusters.d`. If you would rather pin it,
   drop `cluster` from the `form:` list and add a top-level `cluster: "<id>"`.
-- **QOS** — `submit.yml.erb` passes `--qos=general`. Change it if your account
-  uses a different QOS.
+- **QOS** — a form field, defaulting to `general`. Blank submits with no `--qos`
+  at all, so a site that does not use QOS needs no edit. It is a free-text field
+  rather than a menu because the valid set is per-account, not per-site; a site
+  that wants a menu can swap it for a `select` in `form.yml`.
 - **Login host** — the form defaults to `mantis-submit.cam.uchc.edu`, the
   round-robin alias for the submit nodes. It only affects the Arrow Flight tunnel
   command on the card; users can edit it per session.
