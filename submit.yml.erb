@@ -18,7 +18,12 @@ batch_connect:
 script:
   job_name: "biopb-browser"
   native:
-    - "--qos=general"
+    # A blank QOS is meaningful: it submits with no --qos at all, so Slurm
+    # applies the account default. Sites that do not use QOS therefore need no
+    # edit here, they just clear the field.
+    <%- unless qos.to_s.strip.empty? -%>
+    - "--qos=<%= qos.strip %>"
+    <%- end -%>
     - "--nodes=1"
     - "--ntasks=1"
     - "--cpus-per-task=<%= num_cores %>"
