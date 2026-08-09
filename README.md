@@ -42,12 +42,22 @@ independent reasons:
    reached over `ssh -L`.
 
 So the session card gives you a tunnel command instead of a link into the portal.
-Making this a one-click OnDemand app requires runtime URL-prefix support
-upstream — tracked as biopb/biopb#728. The control-plane half (a `--url-prefix`
-that strips the prefix from incoming requests and rewrites the SPA shell to load
-under it) is the smaller piece; the SPA still has to take its router basename and
-API base from the injected `window.__BIOPB_BASE__` instead of a build-time
-constant. Until both land, keep the tunnel.
+
+**There is now a proxied alternative, on the [`dev`](../../tree/dev) branch.**
+biopb/biopb#731 added `--url-prefix`: the control strips a configured path prefix
+off incoming requests and rewrites the SPA shell (a `<base href>`, the
+root-absolute asset URLs, and a `window.__BIOPB_BASE__` the app reads in place of
+a build-time constant), which is exactly what reason 1 above was missing. That
+branch serves the UI through OnDemand's proxy and its session card is a Connect
+button.
+
+Two reasons this branch is still the default. #731 is on biopb's `dev` branch and
+**not in any release**, so `dev` needs a build from source. And it does not
+address reason 2: OnDemand's proxy dials the compute node over the network, so
+that branch has to publish the control, and the token then crosses the portal →
+node hop in the clear. Use `dev` if your compute network is one you trust —
+that is the same bet an OnDemand Jupyter app already makes — and this branch
+otherwise.
 
 ## Requirements
 
