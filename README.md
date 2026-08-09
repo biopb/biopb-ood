@@ -43,15 +43,23 @@ this app is the tunnel variant and works against the 0.12.0 release.
 ### What this costs, and why the tunnel branch still exists
 
 OnDemand's proxy runs on the portal's web node and connects to the compute node
-over the network, so the control plane binds `0.0.0.0` here instead of loopback
-(`BIOPB_CONTROL_HOST`, biopb's documented escape hatch for the control bind). The
-access token gates it, but the control speaks plain HTTP with no TLS
-(biopb/biopb#614), so **the token crosses the portal → compute-node hop in the
-clear.** Browser → portal is HTTPS.
+over the network, so the control plane binds `0.0.0.0` here instead of loopback.
+That is `BIOPB_CONTROL_HOST`, and it is the escape hatch biopb/biopb#618 left
+open on purpose: *"publishing the UI stays possible for someone fronting it with
+their own TLS proxy, but only as the deliberate, named act of passing a public
+`--control-host`."* OnDemand is that proxy — for the browser → portal leg.
 
-This is the same posture as every OnDemand Jupyter app, and it is acceptable on a
-private cluster network. If your site's compute network is not one you trust,
-use the `main` branch instead — it keeps every listener on loopback and moves the
+It is not one for the portal → compute-node leg. The control has no TLS support
+at all (its `uvicorn.Config` sets no `ssl_certfile`/`ssl_keyfile`; biopb's `--tls`
+reaches only the Flight plane), so **the access token that gates the data *and*
+admin API crosses the cluster network in the clear.** Note #614 is closed but did
+not fix this: #618 resolved it by taking the public bind away, not by adding TLS,
+which is exactly why publishing the UI is a deliberate act here.
+
+**This deployment accepts that**, because the portal's Jupyter app is configured
+the same way and the compute network is trusted — biopb introduces no exposure
+the site does not already carry. A site that cannot make that assumption should
+run the `main` branch instead: it keeps every listener on loopback and moves the
 whole session over SSH.
 
 The sidecar and the Arrow Flight plane are unaffected: they stay on `127.0.0.1`.
