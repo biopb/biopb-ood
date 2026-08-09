@@ -10,6 +10,29 @@ cluster:
   <%- OodAppkit.clusters.select(&:job_allow?).sort_by(&:id).each do |c| -%>
   - "<%= c.id %>"
   <%- end -%>
+<%-
+  # Default for `login_host` below, read from OnDemand's own cluster config
+  # (`v2.login.host` in /etc/ood/config/clusters.d/<id>.yml) instead of naming a
+  # site here. Same source the portal's Shell Access app uses.
+  #
+  # Fail-safe on purpose. A form.yml that raises while rendering takes the whole
+  # app down with it, and this is only the default for one editable text field —
+  # so no clusters, no login section, or an OodAppkit that does not expose it all
+  # degrade to blank rather than to a broken form. Blank is handled: the session
+  # card then shows a direct ssh to the compute node, with a note about adding
+  # -J yourself.
+  #
+  # Multi-cluster sites: this takes the first job-allowed cluster, and form.yml
+  # renders once, so the default cannot follow the cluster menu. It stays
+  # editable per session; a site that wants it to track the selection can drive
+  # it from OnDemand's `data-set-*` option attributes.
+  biopb_login_host = begin
+    c = OodAppkit.clusters.select(&:job_allow?).sort_by(&:id).first
+    (c && c.login && c.login.host).to_s
+  rescue StandardError
+    ""
+  end
+-%>
 
 attributes:
   user_data_dir:
@@ -86,10 +109,14 @@ attributes:
 
   login_host:
     label: "SSH login host"
-    value: "mantis-submit.cam.uchc.edu"
+    value: "<%= biopb_login_host %>"
     help: |
-      The host you normally SSH into from off-campus. Used only to build the
-      tunnel command shown on the session card.
+      The host you normally SSH into. Prefilled from your cluster's OnDemand
+      configuration; correct it if your site uses a different name from off-site.
+
+      Used for one thing only: the Arrow Flight tunnel command on the session
+      card, for the Python/Java SDK and napari. The web UI does not need it — the
+      portal proxies that. Leave it blank if you reach compute nodes directly.
 
 form:
   - cluster

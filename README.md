@@ -137,9 +137,14 @@ Four values are site-dependent. The first two can actually break the app.
   at all, so a site that does not use QOS needs no edit. It is a free-text field
   rather than a menu because the valid set is per-account, not per-site; a site
   that wants a menu can swap it for a `select` in `form.yml`.
-- **Login host** — the form defaults to `mantis-submit.cam.uchc.edu`, the
-  round-robin alias for the submit nodes. It only affects the Arrow Flight tunnel
-  command on the card; users can edit it per session.
+- **Login host** — read from your cluster's own OnDemand config (`v2.login.host`
+  in `/etc/ood/config/clusters.d/<id>.yml`), so there is nothing site-specific to
+  edit. It only affects the Arrow Flight tunnel command on the card, and stays
+  editable per session. If the lookup finds nothing the field is blank and the
+  card shows a direct `ssh` to the compute node instead of a broken `-J`.
+  Multi-cluster sites: `form.yml` renders once, so the default takes the first
+  job-allowed cluster and cannot follow the cluster menu; drive it from
+  OnDemand's `data-set-*` option attributes if that matters.
 
 ## How a session works
 

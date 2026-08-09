@@ -1,8 +1,11 @@
 <%-
   user       = ood_user
   app_url    = "#{url_prefix}/?token=#{biopb_token}"
-  flight_cmd = "ssh -N -L #{grpc_port}:127.0.0.1:#{grpc_port} " \
-               "-J #{user}@#{login_host} #{user}@#{host}"
+  # A login host is only needed to *reach* the compute node. Blank means either
+  # the site's OnDemand config declares none or the user cleared it, so emit a
+  # direct ssh rather than a `-J @` that cannot work.
+  jump       = login_host.to_s.strip.empty? ? "" : "-J #{user}@#{login_host.strip} "
+  flight_cmd = "ssh -N -L #{grpc_port}:127.0.0.1:#{grpc_port} #{jump}#{user}@#{host}"
   uid        = "biopb-#{port}"
 -%>
 
@@ -51,6 +54,12 @@
         <p class="help-block" style="margin-top:4px">
           Then connect to <code>grpc://localhost:<%= grpc_port %></code> with the
           token from the link above.
+          <%- if jump.empty? -%>
+          If <code><%= host %></code> is not reachable from your machine, hop
+          through your login host by adding
+          <code>-J <%= user %>@&lt;login-host&gt;</code> — or set one in the
+          launch form and it will be filled in here.
+          <%- end -%>
         </p>
       </td>
     </tr>
