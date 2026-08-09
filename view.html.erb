@@ -1,59 +1,19 @@
 <%-
   user       = ood_user
-  tunnel_cmd = "ssh -N -L #{port}:127.0.0.1:#{port} -J #{user}@#{login_host} #{user}@#{host}"
-  app_url    = "http://localhost:#{port}/?token=#{biopb_token}"
+  app_url    = "#{url_prefix}/?token=#{biopb_token}"
+  flight_cmd = "ssh -N -L #{grpc_port}:127.0.0.1:#{grpc_port} " \
+               "-J #{user}@#{login_host} #{user}@#{host}"
   uid        = "biopb-#{port}"
 -%>
 
-<div class="well well-sm" style="margin-bottom:10px">
-  <p style="margin:0">
-    The BioPB web UI runs on <strong>127.0.0.1</strong> on the compute node and is
-    not published to the network — it speaks plain HTTP, so exposing it would put
-    your access token on the wire in the clear. Reach it through an SSH tunnel:
-  </p>
-</div>
-
 <div style="margin-bottom:14px">
-  <label style="display:block;margin-bottom:4px">
-    <span class="label label-primary">Step 1</span>
-    Run this on <em>your own computer</em> and leave it running:
-  </label>
-  <div class="input-group">
-    <input type="text" readonly class="form-control" id="<%= uid %>-cmd"
-           style="font-family:monospace;font-size:12px"
-           value="<%= tunnel_cmd %>">
-    <span class="input-group-btn">
-      <button class="btn btn-default" type="button"
-              onclick="biopbCopy('<%= uid %>-cmd', this)">
-        <i class="fa fa-clipboard"></i> Copy
-      </button>
-    </span>
-  </div>
-  <p class="help-block" style="margin-top:4px">
-    It prints nothing and does not return — that is normal. Keep the terminal
-    open for as long as you are using the browser. On Windows, run it in
-    PowerShell or Windows Terminal.
-  </p>
-</div>
-
-<div style="margin-bottom:14px">
-  <label style="display:block;margin-bottom:4px">
-    <span class="label label-primary">Step 2</span>
-    Then open the browser UI:
-  </label>
   <a href="<%= app_url %>" target="_blank" rel="noopener"
-     class="btn btn-primary">
-    <i class="fa fa-microscope"></i> Open BioPB Image Browser
+     class="btn btn-primary btn-lg">
+    <i class="fa fa-microscope"></i> Connect to BioPB
   </a>
-  <button class="btn btn-default" type="button"
-          onclick="biopbCopy('<%= uid %>-url', this)">
-    <i class="fa fa-clipboard"></i> Copy link
-  </button>
-  <input type="hidden" id="<%= uid %>-url" value="<%= app_url %>">
-  <p class="help-block" style="margin-top:6px">
+  <p class="help-block" style="margin-top:8px">
     The link carries your access token; the app stores it and strips it from the
-    address bar. If you get <em>connection refused</em>, the tunnel in step 1 is
-    not running. If the catalog looks empty at first, the data plane is still
+    address bar. If the catalog looks empty at first, the data plane is still
     indexing — it fills in as it scans.
   </p>
 </div>
@@ -72,10 +32,26 @@
       <th>Arrow Flight</th>
       <td>
         <code>grpc://127.0.0.1:<%= grpc_port %></code>
-        <span class="help-block" style="display:inline;margin-left:6px">
-          for the Python/Java SDK or napari, over the same tunnel
-          (add <code>-L <%= grpc_port %>:127.0.0.1:<%= grpc_port %></code>)
-        </span>
+        <p class="help-block" style="margin:4px 0 6px">
+          For the Python/Java SDK or napari. Unlike the web UI, this one is not
+          published through the portal — it stays on the node's loopback, so it
+          needs an SSH tunnel. Run this on your own computer and leave it going:
+        </p>
+        <div class="input-group">
+          <input type="text" readonly class="form-control" id="<%= uid %>-flight"
+                 style="font-family:monospace;font-size:12px"
+                 value="<%= flight_cmd %>">
+          <span class="input-group-btn">
+            <button class="btn btn-default" type="button"
+                    onclick="biopbCopy('<%= uid %>-flight', this)">
+              <i class="fa fa-clipboard"></i> Copy
+            </button>
+          </span>
+        </div>
+        <p class="help-block" style="margin-top:4px">
+          Then connect to <code>grpc://localhost:<%= grpc_port %></code> with the
+          token from the link above.
+        </p>
       </td>
     </tr>
   </tbody>

@@ -12,7 +12,11 @@
 
 set -euo pipefail
 
-export PATH="${HOME}/.local/bin:${PATH}"
+# Normally the installer's bin dir. Overridable for the same reason as
+# BIOPB_WEBAPP_DIR below: this branch needs an unreleased biopb, and the CLI and
+# the web bundle must come from the *same* tree. Point both at a build tree to
+# run one, and leave both unset for an ordinary install.
+export PATH="${BIOPB_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
 
 STAGED_ROOT="${PWD}"
 CONFIG_FILE="${STAGED_ROOT}/biopb.json"
@@ -42,7 +46,10 @@ if ! command -v biopb >/dev/null 2>&1; then
   exit 1
 fi
 
-WEBAPP_DIR="${HOME}/.local/share/biopb/webapp"
+# Normally the installer's bundle. Overridable because this branch requires an
+# unreleased biopb (biopb/biopb#731), so the CLI and the bundle may well come from
+# a build tree rather than ~/.local — and they have to come from the same one.
+WEBAPP_DIR="${BIOPB_WEBAPP_DIR:-${HOME}/.local/share/biopb/webapp}"
 if [[ ! -f "${WEBAPP_DIR}/index.html" ]]; then
   echo "ERROR: the web UI bundle is missing at ${WEBAPP_DIR}." >&2
   echo "Re-run the biopb installer to restore it." >&2
@@ -75,30 +82,46 @@ JSON
 
 echo "BioPB session starting on $(hostname)"
 echo "  data directory : <%= user_data_dir %>"
-echo "  control (UI)   : 127.0.0.1:${control_port}"
+echo "  control (UI)   : 0.0.0.0:${control_port}  (portal proxy target)"
+echo "  published at   : ${url_prefix}/"
 echo "  HTTP sidecar   : 127.0.0.1:${sidecar_port}"
 echo "  Arrow Flight   : 127.0.0.1:${grpc_port}"
 
-# Two CLI generations in the wild. The 0.12.0 release takes the control port
-# from BIOPB_CONTROL_PORT and the sidecar port from --web-port; builds carrying
-# biopb/biopb#614 replaced both with a single --base-port. Pick whichever this
-# install actually offers so the app survives a biopb upgrade.
-if biopb control run --help 2>/dev/null | grep -q -- '--base-port'; then
-  echo "  (using --base-port interface)"
-  set -- --base-port "${base_port}" --grpc-bind 127.0.0.1 --no-tls
-else
-  echo "  (using BIOPB_CONTROL_PORT + --web-port interface)"
-  export BIOPB_CONTROL_PORT="${control_port}"
-  set -- --web-port "${sidecar_port}"
+# This branch serves the UI through OnDemand's proxy, which requires a biopb
+# carrying --url-prefix (biopb/biopb#731). Without it the control emits a shell
+# whose asset and API URLs are anchored at the *portal* root, so the page would
+# load nothing behind the proxy — and it would fail as a blank screen rather than
+# as an error. Refuse up front instead.
+if ! biopb control run --help 2>/dev/null | grep -q -- '--url-prefix'; then
+  echo "ERROR: this biopb install does not support --url-prefix." >&2
+  echo "       The portal-proxied app needs biopb/biopb#731 (currently on the" >&2
+  echo "       biopb dev branch, not in a release). Either upgrade biopb, or" >&2
+  echo "       use the main branch of this app, which reaches the same stack" >&2
+  echo "       over an SSH tunnel and works on 0.12.0." >&2
+  exit 1
 fi
 
+# The OnDemand proxy runs on the portal's web node and connects to this compute
+# node over the network, so the control cannot stay on loopback the way biopb's
+# default assumes. BIOPB_CONTROL_HOST is biopb's documented escape hatch for the
+# control bind (`_control_bind_endpoint`: "env still wins"). The access token
+# gates it; the sidecar and the Flight plane are unaffected and stay on 127.0.0.1.
+#
+# The cost, stated plainly: portal -> compute node is plain HTTP, so the token
+# crosses the cluster network in the clear (biopb/biopb#614 — the control has no
+# TLS). Browser -> portal is HTTPS. This is the same posture as every OnDemand
+# Jupyter app, and it is the reason the tunnel variant on `main` still exists.
+export BIOPB_CONTROL_HOST=0.0.0.0
 export BIOPB_TENSOR_TOKEN="${biopb_token}"
 
 biopb control run \
   --config "${CONFIG_FILE}" \
   --static-dir "${WEBAPP_DIR}" \
-  --log-level INFO \
-  "$@" &
+  --base-port "${base_port}" \
+  --grpc-bind 127.0.0.1 \
+  --no-tls \
+  --url-prefix "${url_prefix}" \
+  --log-level INFO &
 CONTROL_PID=$!
 
 # Wait for the browser origin to be serving before declaring the session ready.
@@ -133,7 +156,22 @@ done
 echo
 
 if [[ "${READY}" == "1" ]]; then
-  echo "BioPB is ready. Open the session card for the SSH tunnel command."
+  # The readiness gate above probes the *unprefixed* path over loopback, which a
+  # prefixed control still answers. That is not what the portal will ask for, so
+  # confirm the published document once: the shell must come back carrying the
+  # <base href> the SPA reads its prefix from. A 200 without it means the bundle
+  # predates biopb/biopb#731 even though the CLI accepted the flag, which would
+  # otherwise surface as a blank page with no explanation.
+  shell="$(curl -s -m 5 "http://127.0.0.1:${control_port}${url_prefix}/" 2>/dev/null || true)"
+  if grep -q "<base href=\"${url_prefix}/\">" <<<"${shell}"; then
+    echo "BioPB is ready, published at ${url_prefix}/"
+  else
+    echo "WARNING: the control is up but the page served at ${url_prefix}/ carries" >&2
+    echo "         no <base href>, so the browser will resolve its assets at the" >&2
+    echo "         portal root and the UI will come up blank. The installed web" >&2
+    echo "         bundle is probably older than the CLI — reinstall biopb so the" >&2
+    echo "         two match." >&2
+  fi
 else
   echo "WARNING: the data plane did not report ready in time; leaving the" >&2
   echo "         session up anyway so you can inspect the log above." >&2
