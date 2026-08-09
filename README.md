@@ -76,10 +76,12 @@ output. The tunnel branch, whose control stays on loopback, keeps it.
 **[INSTALL.md](INSTALL.md) is the step-by-step guide**, single-user and
 site-wide taken separately. In short:
 
-- A biopb carrying **biopb/biopb#731**, which is on biopb's `dev` branch and
-  **not in any release** — so this branch has to be built from source. Both
-  halves, the CLI and the web bundle, must come from the same tree: a new CLI
-  with an old bundle starts cleanly and then serves a blank page.
+- A biopb whose `control run --help` lists `--url-prefix` (**biopb/biopb#731**).
+  `curl -sSfL https://biopb.org/install.sh | bash` is the normal user install;
+  the guide also covers a minimal wheel install for headless nodes, a shared
+  install for a site, and a source build for tracking biopb's `dev` branch.
+- The CLI and the web bundle from the **same release** — a new CLI with an old
+  bundle starts cleanly and then serves a blank page.
 - The container image (`jiyuuchc/biopb-tensor-server`) cannot serve this UI. It
   is a headless Flight-only data plane with no web front end.
 - Slurm, and a home directory the compute nodes can see.
