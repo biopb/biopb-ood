@@ -184,3 +184,14 @@ exercised from a normal Slurm job by rendering the templates with `erb` and
 supplying stand-ins for OnDemand's `find_port` / `port_used` / `create_passwd`
 helpers. That is how this app was validated end to end — including the real
 ProxyJump tunnel and a PNG render round-trip.
+
+One thing a hand-rolled `erb` run will *not* reproduce is the binding, and the
+two the dashboard uses are not the same:
+
+| file | binding | form values are |
+|---|---|---|
+| `submit.yml.erb` | an `OpenStruct` of the form (`SessionContext#to_openstruct`) | bare: `<%= qos %>` |
+| `template/*.erb` | `TemplateBinding.new(session, context)` — a two-member Struct, no `method_missing` | qualified: `<%= context.user_data_dir %>` |
+
+A bare form name in a staged template raises `undefined local variable or
+method` at submit time, which surfaces as a dashboard backtrace and no job.

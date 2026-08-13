@@ -57,6 +57,13 @@ export biopb_token="$(create_passwd 32)"
 # Copied into connection.yml for the session card (see submit.yml.erb). The
 # username is resolved here rather than in the view, so the card does not depend
 # on a dashboard helper being in scope when it renders.
-export login_host="<%= login_host %>"
-export data_dir="<%= user_data_dir %>"
+#
+# Form values are reached as `context.<id>`, not bare. The dashboard renders the
+# staged templates with `TemplateBinding.new(session, context)` (a two-member
+# Struct with no method_missing), so `session` and `context` are the *only*
+# names in scope here. submit.yml.erb is the one that gets an OpenStruct of the
+# form, which is why bare `<%%= qos %>` is right there and wrong here. (And that
+# escape is why this comment does not blow up: ERB reads comments too.)
+export login_host="<%= context.login_host %>"
+export data_dir="<%= context.user_data_dir %>"
 export ood_user="${USER:-$(id -un)}"

@@ -62,19 +62,19 @@ cat > "${CONFIG_FILE}" <<JSON
   "cache": {
     "backend": "file",
     "file_cache_dir": "${CACHE_DIR}",
-    "file_max_total_gb": <%= cache_gb %>
+    "file_max_total_gb": <%= context.cache_gb %>
   },
   "sources": [
     {
-      "url": "<%= user_data_dir %>",
-      "monitor": <%= monitor_sources %>
+      "url": "<%= context.user_data_dir %>",
+      "monitor": <%= context.monitor_sources %>
     }
   ]
 }
 JSON
 
 echo "BioPB session starting on $(hostname)"
-echo "  data directory : <%= user_data_dir %>"
+echo "  data directory : <%= context.user_data_dir %>"
 echo "  control (UI)   : 127.0.0.1:${control_port}"
 echo "  HTTP sidecar   : 127.0.0.1:${sidecar_port}"
 echo "  Arrow Flight   : 127.0.0.1:${grpc_port}"
