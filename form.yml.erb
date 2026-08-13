@@ -1,5 +1,10 @@
 ---
-# Rendered through ERB by the OnDemand dashboard, so <%= %> works here.
+# The `.erb` suffix is load-bearing: the dashboard renders this file through ERB
+# only when the name ends in `.erb` (`BatchConnect::App#read_yaml_erb`). Named
+# plain `form.yml`, every ERB tag below survives into the YAML as literal text —
+# `cluster` then holds a string no cluster is named after, and the app refuses to
+# open with "This app requires clusters that do not exist or you do not have
+# access to."
 #
 # The cluster list is built from whatever OnDemand has configured in
 # /etc/ood/config/clusters.d rather than hard-coded, so this app does not have to
@@ -15,14 +20,14 @@ cluster:
   # (`v2.login.host` in /etc/ood/config/clusters.d/<id>.yml) instead of naming a
   # site here. Same source the portal's Shell Access app uses.
   #
-  # Fail-safe on purpose. A form.yml that raises while rendering takes the whole
+  # Fail-safe on purpose. A form that raises while rendering takes the whole
   # app down with it, and this is only the default for one editable text field —
   # so no clusters, no login section, or an OodAppkit that does not expose it all
   # degrade to blank rather than to a broken form. Blank is handled: the session
   # card then shows a direct ssh to the compute node, with a note about adding
   # -J yourself.
   #
-  # Multi-cluster sites: this takes the first job-allowed cluster, and form.yml
+  # Multi-cluster sites: this takes the first job-allowed cluster, and the form
   # renders once, so the default cannot follow the cluster menu. It stays
   # editable per session; a site that wants it to track the selection can drive
   # it from OnDemand's `data-set-*` option attributes.

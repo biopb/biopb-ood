@@ -201,7 +201,7 @@ copying a snippet.
 | setting | where | note |
 |---|---|---|
 | Node URI | `template/before.sh.erb` builds `/node/$host/$port` | must match the portal's `node_uri`; a mismatch 404s every request rather than failing visibly |
-| Data directory root | `form.yml`, `directory: CurrentUser.home` | **widen this for group shares** — as shipped, users can browse only their own home |
+| Data directory root | `form.yml.erb`, `directory: CurrentUser.home` | **widen this for group shares** — as shipped, users can browse only their own home |
 | QOS | form field, default `general` | change the default, or clear it to submit with no `--qos` |
 | Cluster | derived from `OodAppkit.clusters` | no edit needed |
 | Login host | derived from the cluster's `v2.login.host` | no edit needed; used only for the Arrow Flight tunnel |
@@ -274,6 +274,7 @@ Set them in the job environment, or edit the two defaults at the top of
 
 | symptom | cause |
 |---|---|
+| The app opens with no form: "This app requires clusters that do not exist or you do not have access to" | the form file lost its `.erb` extension (the dashboard then never renders it), or the cluster genuinely is not in `/etc/ood/config/clusters.d` / not one you may submit to |
 | Job exits at once, "does not support `--url-prefix`" | biopb predates #731 — upgrade, or use this app's `main` branch, which tunnels instead |
 | Page loads blank, console 404s on `/assets/*` | CLI and bundle are from different releases |
 | Portal says 503 / failed to connect | the control did not bind the node's interfaces; check `BIOPB_CONTROL_HOST` in the job output |

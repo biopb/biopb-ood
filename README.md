@@ -100,7 +100,7 @@ normally.
 |---|---|
 | `INSTALL.md` | how to deploy it, single-user and site-wide |
 | `manifest.yml` | app name, category, icon |
-| `form.yml` | the launch form (ERB-rendered) |
+| `form.yml.erb` | the launch form (the `.erb` suffix is what gets it rendered) |
 | `submit.yml.erb` | Slurm resources + which vars reach `view.html.erb` |
 | `template/before.sh.erb` | allocates ports + access token on the compute node |
 | `template/script.sh.erb` | writes the session config and runs `biopb control run` |
@@ -120,19 +120,23 @@ Four values are site-dependent. The first two can actually break the app.
   mismatch makes every request 404 rather than fail visibly. Do **not** point it
   at `/rnode/`: that route strips the prefix before the backend sees it, which is
   the opposite of what `--url-prefix` expects.
-- **Cluster** — `form.yml` builds the list from `OodAppkit.clusters`, so it adapts
-  to whatever is in `/etc/ood/config/clusters.d`. If you would rather pin it,
-  drop `cluster` from the `form:` list and add a top-level `cluster: "<id>"`.
+- **Cluster** — `form.yml.erb` builds the list from `OodAppkit.clusters`, so it
+  adapts to whatever is in `/etc/ood/config/clusters.d`. If you would rather pin
+  it, drop `cluster` from the `form:` list and add a top-level `cluster: "<id>"`.
+  Keep the file's `.erb` extension whatever you do: the dashboard renders the
+  form through ERB only when the name says `.erb`, and a plain `form.yml` makes
+  the app open as *"This app requires clusters that do not exist or you do not
+  have access to"* — the ERB tags reach the YAML parser verbatim.
 - **QOS** — a form field, defaulting to `general`. Blank submits with no `--qos`
   at all, so a site that does not use QOS needs no edit. It is a free-text field
   rather than a menu because the valid set is per-account, not per-site; a site
-  that wants a menu can swap it for a `select` in `form.yml`.
+  that wants a menu can swap it for a `select` in `form.yml.erb`.
 - **Login host** — read from your cluster's own OnDemand config (`v2.login.host`
   in `/etc/ood/config/clusters.d/<id>.yml`), so there is nothing site-specific to
   edit. It only affects the Arrow Flight tunnel command on the card, and stays
   editable per session. If the lookup finds nothing the field is blank and the
   card shows a direct `ssh` to the compute node instead of a broken `-J`.
-  Multi-cluster sites: `form.yml` renders once, so the default takes the first
+  Multi-cluster sites: `form.yml.erb` renders once, so the default takes the first
   job-allowed cluster and cannot follow the cluster menu; drive it from
   OnDemand's `data-set-*` option attributes if that matters.
 
@@ -217,6 +221,7 @@ arr = client.get_tensor("<source_id>/<field>")   # lazy dask array
 
 | Symptom | Cause |
 |---|---|
+| No form at all: "This app requires clusters that do not exist or you do not have access to" | the form file is not named `form.yml.erb`, so its ERB never ran and `cluster` is a literal `<%- … -%>` string. Otherwise: the cluster really is absent from `/etc/ood/config/clusters.d`, or your account is not allowed to submit to it |
 | Page loads blank, console 404s on `/assets/*` | the web bundle predates biopb/biopb#731 — the job output warns about this at startup |
 | Portal returns 503 / "failed to connect" | the control did not bind the node's interfaces; check `BIOPB_CONTROL_HOST` in the job output |
 | Every request 404s | the portal's `node_uri` is not `/node` — see Site-specific settings |
