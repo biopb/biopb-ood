@@ -127,6 +127,14 @@ Four values are site-dependent. The first two can actually break the app.
   mismatch makes every request 404 rather than fail visibly. Do **not** point it
   at `/rnode/`: that route strips the prefix before the backend sees it, which is
   the opposite of what `--url-prefix` expects.
+- **The node's name in that prefix** — `before.sh.erb` replaces OnDemand's
+  `host=$(hostname)` with the fully qualified name when the node reports one.
+  The portal matches `/node/<host>/<port>` against `host_regex` in
+  `ood_portal.yml`, and a site that qualifies that pattern with its domain
+  never matches a short name: Apache falls through to its document root and
+  answers a bare 404, with nothing in the job output to suggest the name was at
+  fault. A site whose `host_regex` wants the short name instead should drop the
+  `hostname -f` block.
 - **Cluster** — `form.yml.erb` builds the list from `OodAppkit.clusters`, so it
   adapts to whatever is in `/etc/ood/config/clusters.d`. If you would rather pin
   it, drop `cluster` from the `form:` list and add a top-level `cluster: "<id>"`.
@@ -231,7 +239,8 @@ arr = client.get_tensor("<source_id>/<field>")   # lazy dask array
 | No form at all: "This app requires clusters that do not exist or you do not have access to" | the form file is not named `form.yml.erb`, so its ERB never ran and `cluster` is a literal `<%- … -%>` string. Otherwise: the cluster really is absent from `/etc/ood/config/clusters.d`, or your account is not allowed to submit to it |
 | Page loads blank, console 404s on `/assets/*` | the web bundle predates biopb/biopb#731 — the job output warns about this at startup |
 | Portal returns 503 / "failed to connect" | the control did not bind the node's interfaces; check `BIOPB_CONTROL_HOST` in the job output |
-| Every request 404s | the portal's `node_uri` is not `/node` — see Site-specific settings |
+| Connect button lands on a plain Apache "Not Found" (`Server at … Port 443` in the footer) | the portal never matched the route, so nothing reached the node. Either `node_uri` is not `/node`, or the host in the URL is not the form `host_regex` accepts — compare with a working app's link (`/node/<node>.<domain>/<port>/…`). Both in Site-specific settings |
+| Every request 404s, but the page itself loaded | the prefix biopb was told does not match what the portal sends |
 | `401 Unauthorized` | open the button from the card — it carries the token |
 | Catalog empty at first | still indexing; it fills in progressively |
 | Job exits immediately | `biopb` is missing, too old for `--url-prefix`, or the webapp bundle is absent — the error names which |

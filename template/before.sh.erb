@@ -18,6 +18,25 @@
 # sidecar and the Flight plane stay on 127.0.0.1 — nothing outside the node
 # talks to them directly.
 
+# --- what the portal will call this node ------------------------------------ #
+# OnDemand sets `host=$(hostname)` just before sourcing this file — the node's
+# *short* name. Whether that works depends on the portal's `host_regex` in
+# ood_portal.yml: a site that qualifies it with a domain never matches a short
+# name, and the request falls past the proxy to Apache's document root, so the
+# session card leads to a bare 404 with no hint that the name was the problem.
+#
+# Prefer the fully qualified name whenever the node reports one; keep
+# OnDemand's value if it does not. `host` is exported and read afterwards by
+# both connection.yml and the url_prefix below, so fixing it here fixes every
+# consumer at once.
+# Bounded: `hostname -f` consults the resolver, and a wedged one would
+# otherwise hang the whole job here, before anything has been started.
+fqdn="$(timeout 5 hostname -f 2>/dev/null || true)"
+case "${fqdn}" in
+  *.*) host="${fqdn}" ;;
+esac
+export host
+
 # Find a base port whose +3/+4/+5 offsets are all free. find_port already
 # returns something unused, so this only has to clear the three derived ports.
 find_base_port () {
