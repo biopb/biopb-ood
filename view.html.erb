@@ -1,7 +1,10 @@
 <%-
   user       = ood_user
   tunnel_cmd = "ssh -N -L #{port}:127.0.0.1:#{port} -J #{user}@#{login_host} #{user}@#{host}"
-  app_url    = "http://localhost:#{port}/?token=#{biopb_token}"
+  # Land on the viewer, not the control dashboard: the viewer is what this app is
+  # for. `/viewer` is the SPA's declared route (no trailing slash), and the token
+  # goes in the query string — the app moves it to sessionStorage and strips it.
+  app_url    = "http://localhost:#{port}/viewer?token=#{biopb_token}"
   uid        = "biopb-#{port}"
 -%>
 
@@ -52,9 +55,17 @@
   <input type="hidden" id="<%= uid %>-url" value="<%= app_url %>">
   <p class="help-block" style="margin-top:6px">
     The link carries your access token; the app stores it and strips it from the
-    address bar. If you get <em>connection refused</em>, the tunnel in step 1 is
-    not running. If the catalog looks empty at first, the data plane is still
-    indexing — it fills in as it scans.
+    address bar. Open it rather than typing the address by hand — without the
+    token you land on the unlock page. If you get <em>connection refused</em>,
+    the tunnel in step 1 is not running.
+  </p>
+  <p class="help-block" style="margin-top:6px">
+    <strong>The viewer says "Connecting to server…" until the catalog is
+    built.</strong> That is the data plane indexing your directory, not a broken
+    connection — a few hundred sources takes several minutes on a small core
+    count, and there is no progress bar. The control dashboard, at
+    <code>http://localhost:<%= port %>/</code>, works immediately and shows the
+    server's state while you wait.
   </p>
 </div>
 
