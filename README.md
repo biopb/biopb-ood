@@ -110,6 +110,13 @@ normally.
 outside it are never staged — that was one of the reasons the earlier version of
 this app never launched.
 
+`template/script.sh.erb` must stay **executable** (`100755`). The renderer does
+`output_file.chmod(file.stat.mode)`, so the rendered `script.sh` inherits the
+`.erb`'s mode, and the job script *executes* it — while `before.sh` is only
+sourced, which is why that one can stay `0644`. Committing it 0644 gets you a
+job that writes `connection.yml`, hits `Permission denied` on the next line, and
+leaves a session card with nothing on it.
+
 ## Site-specific settings to check
 
 Four values are site-dependent. The first two can actually break the app.
