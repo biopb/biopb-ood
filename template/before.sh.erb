@@ -18,6 +18,23 @@
 # the wire in the clear (biopb/biopb#614). It stays on loopback and the browser
 # reaches it through the SSH tunnel shown on the session card.
 
+# --- what this node is called ------------------------------------------------ #
+# OnDemand sets `host=$(hostname)` just before sourcing this file — the node's
+# *short* name, which is fine on the cluster and often not resolvable off it.
+# Prefer the fully qualified name when the node reports one, so the ssh command
+# on the session card works from a laptop too. `host` is exported and read
+# afterwards by connection.yml, so fixing it here fixes every consumer at once.
+# (On the dev branch this is load-bearing: the portal matches the proxy prefix
+# against `host_regex`, and a domain-qualified regex never matches a short name.)
+#
+# Bounded: `hostname -f` consults the resolver, and a wedged one would otherwise
+# hang the whole job here, before anything has been started.
+fqdn="$(timeout 5 hostname -f 2>/dev/null || true)"
+case "${fqdn}" in
+  *.*) host="${fqdn}" ;;
+esac
+export host
+
 # Find a base port whose +3/+4/+5 offsets are all free. find_port already
 # returns something unused, so this only has to clear the three derived ports.
 find_base_port () {
