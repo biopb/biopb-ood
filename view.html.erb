@@ -1,6 +1,10 @@
 <%-
   user       = ood_user
-  app_url    = "#{url_prefix}/?token=#{biopb_token}"
+  # Land on the viewer, not the control dashboard: the viewer is what this app is
+  # for. `/viewer` is the SPA's declared route (no trailing slash); under the
+  # prefix the control strips it back off, and the injected <base href> keeps the
+  # SPA's assets resolving from the session root either way.
+  app_url    = "#{url_prefix}/viewer?token=#{biopb_token}"
   # A login host is only needed to *reach* the compute node. Blank means either
   # the site's OnDemand config declares none or the user cleared it, so emit a
   # direct ssh rather than a `-J @` that cannot work.
@@ -16,8 +20,16 @@
   </a>
   <p class="help-block" style="margin-top:8px">
     The link carries your access token; the app stores it and strips it from the
-    address bar. If the catalog looks empty at first, the data plane is still
-    indexing — it fills in as it scans.
+    address bar. Use the button rather than typing the address by hand — without
+    the token you land on the unlock page.
+  </p>
+  <p class="help-block">
+    <strong>The viewer says "Connecting to server…" until the catalog is
+    built.</strong> That is the data plane indexing your directory, not a broken
+    connection — a few hundred sources takes several minutes on a small core
+    count, and there is no progress bar. The control dashboard, at
+    <code><%= url_prefix %>/</code>, works immediately and shows the server's
+    state while you wait.
   </p>
 </div>
 
