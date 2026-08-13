@@ -87,7 +87,7 @@ Home is shared with the compute nodes, so one install covers every session.
 | File | Role |
 |---|---|
 | `manifest.yml` | app name, category, icon |
-| `form.yml` | the launch form (ERB-rendered) |
+| `form.yml.erb` | the launch form (the `.erb` suffix is what gets it rendered) |
 | `submit.yml.erb` | Slurm resources + which vars reach `view.html.erb` |
 | `template/before.sh.erb` | allocates ports + access token on the compute node |
 | `template/script.sh.erb` | writes the session config and runs `biopb control run` |
@@ -103,13 +103,17 @@ Three values are site-dependent. The cluster is the only one that can break the
 app outright; a QOS default your account cannot use just gets the first launch
 rejected by Slurm until it is corrected or cleared.
 
-- **Cluster** — `form.yml` builds the list from `OodAppkit.clusters`, so it adapts
-  to whatever is in `/etc/ood/config/clusters.d`. If you would rather pin it,
-  drop `cluster` from the `form:` list and add a top-level `cluster: "<id>"`.
+- **Cluster** — `form.yml.erb` builds the list from `OodAppkit.clusters`, so it
+  adapts to whatever is in `/etc/ood/config/clusters.d`. If you would rather pin
+  it, drop `cluster` from the `form:` list and add a top-level `cluster: "<id>"`.
+  Keep the file's `.erb` extension whatever you do: the dashboard renders the
+  form through ERB only when the name says `.erb`, and a plain `form.yml` makes
+  the app open as *"This app requires clusters that do not exist or you do not
+  have access to"* — the ERB tags reach the YAML parser verbatim.
 - **QOS** — a form field, defaulting to `general`. Blank submits with no `--qos`
   at all, so a site that does not use QOS needs no edit. It is a free-text field
   rather than a menu because the valid set is per-account, not per-site; a site
-  that wants a menu can swap it for a `select` in `form.yml`.
+  that wants a menu can swap it for a `select` in `form.yml.erb`.
 - **Login host** — the form defaults to `mantis-submit.cam.uchc.edu`, the
   round-robin alias for the submit nodes. It only affects the displayed tunnel
   command; users can edit it per session.
@@ -164,6 +168,7 @@ arr = client.get_tensor("<source_id>/<field>")   # lazy dask array
 
 | Symptom | Cause |
 |---|---|
+| No form at all: "This app requires clusters that do not exist or you do not have access to" | the form file is not named `form.yml.erb`, so its ERB never ran and `cluster` is a literal `<%- … -%>` string. Otherwise: the cluster really is absent from `/etc/ood/config/clusters.d`, or your account is not allowed to submit to it |
 | `connection refused` in the browser | the `ssh -N -L …` tunnel is not running |
 | Card shows but page is blank | check the job output for the control-plane log |
 | `401 Unauthorized` | open the link from the card — it carries the token |

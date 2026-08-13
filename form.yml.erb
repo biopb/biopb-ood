@@ -1,5 +1,10 @@
 ---
-# Rendered through ERB by the OnDemand dashboard, so <%= %> works here.
+# The `.erb` suffix is load-bearing: the dashboard renders this file through ERB
+# only when the name ends in `.erb` (`BatchConnect::App#read_yaml_erb`). Named
+# plain `form.yml`, every ERB tag below survives into the YAML as literal text —
+# `cluster` then holds a string no cluster is named after, and the app refuses to
+# open with "This app requires clusters that do not exist or you do not have
+# access to."
 #
 # The cluster list is built from whatever OnDemand has configured in
 # /etc/ood/config/clusters.d rather than hard-coded, so this app does not have to
