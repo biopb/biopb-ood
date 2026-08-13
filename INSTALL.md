@@ -9,31 +9,51 @@ Two deployments, and they differ in more than scale — pick one before you star
 
 ## What both need
 
-**A biopb whose control plane understands `--url-prefix`**
-([biopb/biopb#731](https://github.com/biopb/biopb/pull/731)). That is what lets
-the UI be served under OnDemand's `/node/<host>/<port>/` path instead of at a
-domain root. One command tells you:
+**biopb 0.13.0 or newer** — the release whose control plane understands
+`--url-prefix` ([biopb/biopb#731](https://github.com/biopb/biopb/pull/731)),
+which is what lets the UI be served under OnDemand's `/node/<host>/<port>/` path
+instead of at a domain root. Rather than compare version strings, ask the CLI:
 
 ```sh
 biopb control run --help | grep -- --url-prefix
 ```
 
-Nothing printed means your biopb predates it: upgrade, or
+Nothing printed means your biopb is too old: upgrade, or
 [build from source](#appendix-building-from-source). This app refuses to start
-against a biopb without it rather than letting the session come up blank.
+against a biopb without the flag rather than letting the session come up blank.
+On 0.12.0 or earlier, use this app's [`tunnel`](../../tree/tunnel) branch, which
+reaches the same session over SSH and needs nothing from the portal.
 
 **The CLI and the web bundle from the same release.** A new CLI with an old
 bundle starts cleanly and then serves a blank page. It matters more than the
-usual version-skew hand-wringing here: the release build used to bake
+usual version-skew hand-wringing here: builds before 0.13.0 baked
 `VITE_TENSOR_API="/data_plane"` into the bundle, and #731 removed that bake
 precisely because a baked value carries no prefix and would silently defeat the
-feature. A pre-#731 bundle cannot serve a prefixed origin whatever CLI you pair
-with it.
+feature. A pre-0.13.0 bundle cannot serve a prefixed origin whatever CLI you
+pair with it.
 
 **An OnDemand portal that proxies `/node`** — the default `node_uri`. If yours
 differs see [site settings](#5-review-the-site-settings). Do not point this app
 at `/rnode/`: that route strips the prefix before the backend sees it, the
 opposite of what `--url-prefix` expects.
+
+Check it against a working interactive app rather than assuming, because both
+ways it can fail look identical from the browser — a plain Apache **404**, with
+`Server at … Port 443` in the footer and nothing in the job output:
+
+```sh
+# an existing app's Connect link tells you both halves at once
+https://portal.example.edu/node/node042.cluster.example.edu/8888/lab
+#                          ^^^^ node_uri   ^^^^^^^^^^^^^^^^^^^^^^^ the host form
+```
+
+If that link carries a fully qualified name, the portal's `host_regex` wants
+one, and `before.sh.erb` supplies it (`hostname -f`). If it carries a short
+name and your nodes report a domain, drop that block — see
+[site settings](#5-review-the-site-settings). If no app on the portal has a
+`/node/…` link at all, the node proxy is probably not enabled: an unauthenticated
+`curl -o /dev/null -w '%{http_code}' https://portal/node/` answers `404` when the
+route is absent, `302` when it exists and merely wants a login.
 
 **Slurm, and a home directory the compute nodes can see.**
 
@@ -82,9 +102,11 @@ tar -xzf webapp.tar.gz --strip-components=1 -C ~/.local/share/biopb/webapp
 Three things that look like mistakes and are not:
 
 - **The wheel versions do not match each other.** The core `biopb` SDK versions
-  independently of the server and control — `release-v0.12.0` ships
-  `biopb-0.9.0` alongside `biopb_control-0.12.0`. You have not downloaded the
-  wrong file.
+  independently of the server and control, so its wheel carries an unrelated
+  number — `release-v0.12.0` shipped `biopb-0.9.0` next to
+  `biopb_control-0.12.0`, and `release-v0.13.0rc1` shipped a `biopb-0.8.1.dev…`
+  build next to `biopb_control-0.13.0rc1`. Take whatever the release page lists;
+  you have not downloaded the wrong file.
 - **`uv tool install` links only `biopb` into `~/.local/bin`.** `biopb-control`
   and `biopb-tensor-server` stay inside the tool environment. That is correct:
   the control spawns its data plane as
@@ -201,6 +223,7 @@ copying a snippet.
 | setting | where | note |
 |---|---|---|
 | Node URI | `template/before.sh.erb` builds `/node/$host/$port` | must match the portal's `node_uri`; a mismatch 404s every request rather than failing visibly |
+| Node name form | `template/before.sh.erb`, the `hostname -f` block | the prefix must use the name the portal's `host_regex` accepts. Qualified is the common case and the default here; a site whose regex wants short names should delete the block. Wrong form = Apache 404, nothing reaches the node |
 | Data directory root | `form.yml.erb`, `directory: CurrentUser.home` | **widen this for group shares** — as shipped, users can browse only their own home |
 | QOS | form field, default `general` | change the default, or clear it to submit with no `--qos` |
 | Cluster | derived from `OodAppkit.clusters` | no edit needed |
@@ -275,7 +298,7 @@ Set them in the job environment, or edit the two defaults at the top of
 | symptom | cause |
 |---|---|
 | The app opens with no form: "This app requires clusters that do not exist or you do not have access to" | the form file lost its `.erb` extension (the dashboard then never renders it), or the cluster genuinely is not in `/etc/ood/config/clusters.d` / not one you may submit to |
-| Job exits at once, "does not support `--url-prefix`" | biopb predates #731 — upgrade, or use this app's `main` branch, which tunnels instead |
+| Job exits at once, "does not support `--url-prefix`" | biopb is older than 0.13.0 — upgrade, or use this app's [`tunnel`](../../tree/tunnel) branch, which tunnels instead |
 | Page loads blank, console 404s on `/assets/*` | CLI and bundle are from different releases |
 | Portal says 503 / failed to connect | the control did not bind the node's interfaces; check `BIOPB_CONTROL_HOST` in the job output |
 | Every request 404s | the portal's `node_uri` is not `/node` |

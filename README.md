@@ -35,10 +35,10 @@ strips the prefix off incoming requests and rewrites the SPA shell (a
 app reads instead of a build-time constant) so everything resolves back inside
 the session's namespace.
 
-This needs **biopb/biopb#731**, which is on biopb's `dev` branch and not in a
-release. `script.sh.erb` checks for `--url-prefix` and refuses to start without
-it, rather than letting the session come up as a blank page. The `main` branch of
-this app is the tunnel variant and works against the 0.12.0 release.
+This needs **biopb 0.13.0 or newer** (biopb/biopb#731 added `--url-prefix`).
+`script.sh.erb` checks for the flag and refuses to start without it, rather than
+letting the session come up as a blank page. Against 0.12.0 or earlier, use the
+[`tunnel`](../../tree/tunnel) branch instead — same app, moved over SSH.
 
 ### What this costs, and why the tunnel branch still exists
 
@@ -59,8 +59,8 @@ which is exactly why publishing the UI is a deliberate act here.
 **This deployment accepts that**, because the portal's Jupyter app is configured
 the same way and the compute network is trusted — biopb introduces no exposure
 the site does not already carry. A site that cannot make that assumption should
-run the `main` branch instead: it keeps every listener on loopback and moves the
-whole session over SSH.
+run the [`tunnel`](../../tree/tunnel) branch instead: it keeps every listener on
+loopback and moves the whole session over SSH.
 
 The sidecar and the Arrow Flight plane are unaffected: they stay on `127.0.0.1`.
 Flight is therefore still tunnel-only, which is what the session card shows for
@@ -76,10 +76,11 @@ output. The tunnel branch, whose control stays on loopback, keeps it.
 **[INSTALL.md](INSTALL.md) is the step-by-step guide**, single-user and
 site-wide taken separately. In short:
 
-- A biopb whose `control run --help` lists `--url-prefix` (**biopb/biopb#731**).
-  `curl -sSfL https://biopb.org/install.sh | bash` is the normal user install;
-  the guide also covers a minimal wheel install for headless nodes, a shared
-  install for a site, and a source build for tracking biopb's `dev` branch.
+- **biopb 0.13.0 or newer** — the release that carries `--url-prefix`
+  (biopb/biopb#731). `curl -sSfL https://biopb.org/install.sh | bash` is the
+  normal user install; the guide also covers a minimal wheel install for
+  headless nodes, a shared install for a site, and a source build for tracking
+  biopb's `dev` branch.
 - The CLI and the web bundle from the **same release** — a new CLI with an old
   bundle starts cleanly and then serves a blank page.
 - The container image (`jiyuuchc/biopb-tensor-server`) cannot serve this UI. It
@@ -237,7 +238,7 @@ arr = client.get_tensor("<source_id>/<field>")   # lazy dask array
 | Symptom | Cause |
 |---|---|
 | No form at all: "This app requires clusters that do not exist or you do not have access to" | the form file is not named `form.yml.erb`, so its ERB never ran and `cluster` is a literal `<%- … -%>` string. Otherwise: the cluster really is absent from `/etc/ood/config/clusters.d`, or your account is not allowed to submit to it |
-| Page loads blank, console 404s on `/assets/*` | the web bundle predates biopb/biopb#731 — the job output warns about this at startup |
+| Page loads blank, console 404s on `/assets/*` | the web bundle predates 0.13.0, or is from a different release than the CLI — the job output warns about this at startup |
 | Portal returns 503 / "failed to connect" | the control did not bind the node's interfaces; check `BIOPB_CONTROL_HOST` in the job output |
 | Connect button lands on a plain Apache "Not Found" (`Server at … Port 443` in the footer) | the portal never matched the route, so nothing reached the node. Either `node_uri` is not `/node`, or the host in the URL is not the form `host_regex` accepts — compare with a working app's link (`/node/<node>.<domain>/<port>/…`). Both in Site-specific settings |
 | Every request 404s, but the page itself loaded | the prefix biopb was told does not match what the portal sends |
@@ -274,5 +275,10 @@ curl -s "http://<node>:<control_port>/node/<node>/<control_port>/" | head
 ```
 
 That must come back with `<base href="/node/<node>/<control_port>/">` and asset
-URLs under the same prefix. The `main` branch was validated end to end this way
-— including the real ProxyJump tunnel and a PNG render round-trip.
+URLs under the same prefix. Note the node name has to be the one your portal's
+`host_regex` accepts — the same FQDN `before.sh.erb` puts in the prefix, not the
+short name — or you are testing a path the proxy would never send.
+
+Both branches were validated end to end this way, including a PNG render
+round-trip; the [`tunnel`](../../tree/tunnel) branch additionally over a real
+ProxyJump tunnel.
