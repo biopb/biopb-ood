@@ -91,14 +91,24 @@ attributes:
   monitor_sources:
     label: "Watch the data directory for changes"
     widget: "select"
-    value: "false"
+    value: "true"
     options:
-      - ["No  — index once at startup (recommended)", "false"]
-      - ["Yes — re-scan continuously for new files", "true"]
+      - ["Yes — open now, index in the background (recommended)", "true"]
+      - ["No  — index everything before opening", "false"]
     help: |
-      Live monitoring polls the filesystem. On a large or slow shared filesystem
-      that costs real I/O, so leave it off unless you are actively writing new
-      data into this folder during the session.
+      This decides *when the session opens*, not just whether new files are
+      noticed.
+
+      Yes: the server starts serving immediately and the catalog fills in behind
+      you, so the session is usable in seconds. Images appear as they are found,
+      and files you add mid-session show up too. The cost is that watching polls
+      the filesystem, which is real I/O on a large or slow shared filesystem.
+
+      No: every file is indexed before the server accepts its first connection,
+      so nothing is served — and the session does not come up — until the whole
+      directory has been walked. That is minutes on a large tree. Pick it when
+      you would rather wait once than have the catalog shift under you, or when
+      the folder is on a filesystem you would rather not have polled.
 
   qos:
     label: "QOS"

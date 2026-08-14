@@ -206,12 +206,18 @@ app's own form:
 
 | "Watch the data directory" | what the first 200 means |
 |---|---|
-| **No** (default) | the sources are static, so the launch path registers every one **before** it binds — nothing answers at all until the walk finishes, so the catalog *is* complete |
-| Yes | `SERVING` immediately, catalog filling in the background |
+| **Yes** (default) | `SERVING` as soon as the server binds, catalog filling in the background — the session opens in seconds and images appear as they are found |
+| No | the sources are static, so the launch path registers every one **before** it binds; nothing answers until the walk finishes, and the first 200 therefore does carry a complete catalog |
+
+The default is Yes because the alternative makes people wait for a whole tree
+before seeing anything, and because a partial catalog is perfectly servable —
+the UI lists what exists and grows. It costs filesystem polling, which is the
+reason to choose No on a large or slow shared filesystem.
 
 `script.sh.erb` allows 15 minutes and logs a line a minute with the last status.
-That budget is for the default: the pre-bind walk is minutes on a large tree and
-nothing is listening throughout. Timing out is not fatal — a very large tree can
+That budget exists for the No case, where the pre-bind walk is minutes on a
+large tree and nothing is listening throughout; on the default the gate
+normally clears in seconds. Timing out is not fatal — a very large tree can
 outlast the wait, and the session is usable the moment it finishes.
 
 A cold start on a small dataset is ~8 seconds either way.

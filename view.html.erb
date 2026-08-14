@@ -24,12 +24,15 @@
     the token you land on the unlock page.
   </p>
   <p class="help-block">
-    <strong>The viewer says "Connecting to server…" until the catalog is
-    built.</strong> That is the data plane indexing your directory, not a broken
-    connection — a few hundred sources takes several minutes on a small core
-    count, and there is no progress bar. The control dashboard, at
-    <code><%= url_prefix %>/</code>, works immediately and shows the server's
-    state while you wait.
+    <strong>The catalog fills in while you browse.</strong> The session opens as
+    soon as the server is serving, so the sidebar starts with
+    <em>"Indexing data folder…"</em> and grows as files are found — a few
+    hundred sources takes a few minutes on a small core count. Nothing is wrong
+    if an image you expect is not listed yet. (Launching with
+    <em>Watch the data directory</em> set to No instead indexes everything
+    first, so the session itself takes that long to come up.) The control
+    dashboard, at <code><%= url_prefix %>/</code>, shows the server's state
+    either way.
   </p>
 </div>
 

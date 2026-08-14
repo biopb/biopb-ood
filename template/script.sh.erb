@@ -178,17 +178,19 @@ CONTROL_PID=$!
 # last_full_scan_finished_at; a client that needs the whole catalog waits on
 # those, not on SERVING.
 #
-# What decides which one you get here is this app's own form. With "Watch the
-# data directory" left at No — the default — the sources are static, so the
-# launch path registers every one of them *before* it binds anything: nothing
-# answers at all until the walk finishes, and the first 200 therefore does come
-# with a full catalog. Set it to Yes and the opposite holds: the session is
-# ready almost at once and fills in behind you.
+# What decides which one you get here is this app's own form. "Watch the data
+# directory" defaults to Yes, which monitors the directory: the server binds and
+# reaches SERVING at once, and the catalog fills behind it — so this gate
+# normally clears in seconds and the UI opens on a catalog still growing. Set it
+# to No and the sources become static, which the launch path registers *before*
+# it binds anything: nothing answers at all until the walk finishes, and the
+# first 200 then does come with a complete catalog.
 #
-# Hence the generous budget. On the default, that first walk is minutes on a
+# The budget below is sized for that second case, where the walk is minutes on a
 # large tree and nothing is listening throughout. Timing out is not fatal — the
 # session stays up.
-echo "Waiting for the data plane (up to 15 minutes; a large tree is slow to scan)"
+echo "Waiting for the data plane (seconds while watching the directory; up to 15"
+echo "minutes if you chose to index everything before opening)"
 READY=0
 for attempt in $(seq 1 450); do
   if ! kill -0 "${CONTROL_PID}" 2>/dev/null; then
