@@ -159,14 +159,28 @@ CONTROL_PID=$!
 # control's prefix-stripping /data_plane mount. Do NOT gate on the control's own
 # data_plane.state=="serving": that reflects a TCP probe of the Flight port,
 # which comes up about two seconds before the sidecar binds, so the UI would
-# still 502. Do not require the body's "ready":true either — the sidecar answers
-# before it has connected to Flight, so it reports "degraded"/source_count 0 for
-# a moment on a perfectly healthy start.
-echo -n "Waiting for the data plane"
+# still 502.
+#
+# What a 200 means depends on which biopb you are on, and waiting for one is
+# right either way:
+#
+#   0.13.0 and earlier   /readyz answered 200 unconditionally, including while
+#                        it reported "degraded" with no backend connection at
+#                        all (biopb/biopb#755). The gate passed early — the
+#                        session was announced before the catalog existed.
+#   after #755           /readyz connects to Flight, answers from that health
+#                        alone, and 503s until it says SERVING. Flight only says
+#                        SERVING once the launch path has scanned the data
+#                        folder and registered every source, so a 200 now means
+#                        the catalog is actually there.
+#
+# Hence the budget below is generous: on a fixed biopb this loop waits out the
+# initial scan, which is minutes on a large tree, where before it returned in
+# about a minute regardless. Timing out is not fatal — the session stays up.
+echo "Waiting for the data plane (up to 15 minutes; a large tree is slow to scan)"
 READY=0
-for _ in $(seq 1 150); do
+for attempt in $(seq 1 450); do
   if ! kill -0 "${CONTROL_PID}" 2>/dev/null; then
-    echo
     echo "ERROR: the control plane exited during startup." >&2
     wait "${CONTROL_PID}" || true
     exit 1
@@ -178,10 +192,14 @@ for _ in $(seq 1 150); do
     READY=1
     break
   fi
+  # A line a minute rather than 450 dots, and it names the last status: 503 is
+  # "still scanning", anything else (000, 502) is "the sidecar is not answering
+  # yet". Straight to the job output, which is where anyone debugging looks.
+  if (( attempt % 30 == 0 )); then
+    echo "  still waiting after $(( attempt * 2 / 60 )) min (last /readyz: ${code:-none})"
+  fi
   sleep 2
-  echo -n "."
 done
-echo
 
 if [[ "${READY}" == "1" ]]; then
   # The readiness gate above probes the *unprefixed* path over loopback, which a
@@ -201,8 +219,11 @@ if [[ "${READY}" == "1" ]]; then
     echo "         two match." >&2
   fi
 else
-  echo "WARNING: the data plane did not report ready in time; leaving the" >&2
-  echo "         session up anyway so you can inspect the log above." >&2
+  echo "WARNING: the data plane did not report ready within 15 minutes." >&2
+  echo "         The session is left up anyway — on a large data directory the" >&2
+  echo "         initial scan can simply take longer than the wait, and the UI" >&2
+  echo "         becomes usable as soon as it finishes. Check the log above, and" >&2
+  echo "         /data_plane/readyz for a backend_error." >&2
 fi
 
 wait "${CONTROL_PID}"

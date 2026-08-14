@@ -166,9 +166,11 @@ Four values are site-dependent. The first two can actually break the app.
    file backend takes a cross-process lock), gives the session its own XDG tree
    (below), and runs `biopb control run` with `--url-prefix` and a `0.0.0.0`
    control bind.
-3. It waits for **HTTP 200 on `/data_plane/readyz`**, then confirms the document
-   served at the prefix actually carries a `<base href>` — a CLI new enough to
-   accept the flag paired with an older web bundle would otherwise come up blank.
+3. It waits for **HTTP 200 on `/data_plane/readyz`** (up to 15 minutes — see
+   below for what that 200 does and does not promise), then confirms the
+   document served at the prefix actually carries a `<base href>` — a CLI new
+   enough to accept the flag paired with an older web bundle would otherwise
+   come up blank.
 4. The session card shows a Connect button pointing at the prefix, carrying the
    token as a query parameter.
 
@@ -179,15 +181,28 @@ Gate on HTTP 200 from `/data_plane/readyz`, and nothing else:
 - **Not** the control's `data_plane.state == "serving"`. That comes from a TCP
   probe of the *Flight* port, which comes up about two seconds before the HTTP
   sidecar binds — gate on it and the UI still gets 502s.
-- **Not** the response body's `"ready": true`. The sidecar starts answering
-  before it has connected to Flight, so a perfectly healthy start reports
-  `"status":"degraded"`, `"source_count":0` for a moment.
 - Note the path: health probes (`/readyz`, `/livez`, `/healthz`) live at the
   sidecar **root**; only data endpoints are under `/api/*`. `/data_plane/api/readyz`
   is a 404 by design, not a bug.
 
-A cold start on a small dataset is ~8 seconds. Indexing a large tree keeps going
-in the background; the UI shows "Indexing…" and fills in as it scans.
+**What that 200 means changed under us**, and waiting for one is right either
+way. Through 0.13.0, `/readyz` answered 200 unconditionally — including while
+its body said `"status":"degraded"`, `"source_count":0`, with no backend
+connection at all, because it only *peeked* for a Flight client instead of
+making one (biopb/biopb#755). The gate therefore passed early: this app
+announced a ready session roughly four minutes before the UI could list a
+source, and the viewer sat on "Connecting to server…" in the meantime.
+
+biopb's fix makes `/readyz` connect, answer from that health alone, and return
+**503 until Flight says `SERVING`** — and Flight only says `SERVING` once the
+launch path has finished scanning the data folder and registering every source.
+So on a fixed biopb the gate now waits for a catalog that exists, which is what
+it was always meant to mean. `script.sh.erb` allows 15 minutes for it and logs a
+line a minute with the last status; timing out is not fatal, since a very large
+tree can simply outlast the wait and the session is usable the moment it
+finishes.
+
+A cold start on a small dataset is ~8 seconds either way.
 
 ## Isolation and multi-tenancy
 
