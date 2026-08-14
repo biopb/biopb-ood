@@ -169,14 +169,25 @@ CONTROL_PID=$!
 #                        all (biopb/biopb#755). The gate passed early — the
 #                        session was announced before the catalog existed.
 #   after #755           /readyz connects to Flight, answers from that health
-#                        alone, and 503s until it says SERVING. Flight only says
-#                        SERVING once the launch path has scanned the data
-#                        folder and registered every source, so a 200 now means
-#                        the catalog is actually there.
+#                        alone, and 503s until it says SERVING — so a 200 means
+#                        a data plane that is genuinely there.
 #
-# Hence the budget below is generous: on a fixed biopb this loop waits out the
-# initial scan, which is minutes on a large tree, where before it returned in
-# about a minute regardless. Timing out is not fatal — the session stays up.
+# SERVING is *not* a promise of a complete catalog. Under progressive discovery
+# (biopb/biopb#212) the server reaches SERVING immediately and populates in the
+# background, carrying freshness in full_scan_in_progress and
+# last_full_scan_finished_at; a client that needs the whole catalog waits on
+# those, not on SERVING.
+#
+# What decides which one you get here is this app's own form. With "Watch the
+# data directory" left at No — the default — the sources are static, so the
+# launch path registers every one of them *before* it binds anything: nothing
+# answers at all until the walk finishes, and the first 200 therefore does come
+# with a full catalog. Set it to Yes and the opposite holds: the session is
+# ready almost at once and fills in behind you.
+#
+# Hence the generous budget. On the default, that first walk is minutes on a
+# large tree and nothing is listening throughout. Timing out is not fatal — the
+# session stays up.
 echo "Waiting for the data plane (up to 15 minutes; a large tree is slow to scan)"
 READY=0
 for attempt in $(seq 1 450); do

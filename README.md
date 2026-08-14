@@ -194,13 +194,25 @@ announced a ready session roughly four minutes before the UI could list a
 source, and the viewer sat on "Connecting to server…" in the meantime.
 
 biopb's fix makes `/readyz` connect, answer from that health alone, and return
-**503 until Flight says `SERVING`** — and Flight only says `SERVING` once the
-launch path has finished scanning the data folder and registering every source.
-So on a fixed biopb the gate now waits for a catalog that exists, which is what
-it was always meant to mean. `script.sh.erb` allows 15 minutes for it and logs a
-line a minute with the last status; timing out is not fatal, since a very large
-tree can simply outlast the wait and the session is usable the moment it
-finishes.
+**503 until Flight says `SERVING`** — so a 200 now means a data plane that is
+genuinely there, rather than a sidecar that merely answered.
+
+`SERVING` is not a promise of a complete catalog. Under progressive discovery
+(biopb/biopb#212) the server reaches `SERVING` immediately and populates behind
+you, carrying freshness in `full_scan_in_progress` and
+`last_full_scan_finished_at`; *"a client needing a complete catalog waits on
+those fields, not on `SERVING`"*. Which behaviour you get is decided by this
+app's own form:
+
+| "Watch the data directory" | what the first 200 means |
+|---|---|
+| **No** (default) | the sources are static, so the launch path registers every one **before** it binds — nothing answers at all until the walk finishes, so the catalog *is* complete |
+| Yes | `SERVING` immediately, catalog filling in the background |
+
+`script.sh.erb` allows 15 minutes and logs a line a minute with the last status.
+That budget is for the default: the pre-bind walk is minutes on a large tree and
+nothing is listening throughout. Timing out is not fatal — a very large tree can
+outlast the wait, and the session is usable the moment it finishes.
 
 A cold start on a small dataset is ~8 seconds either way.
 
