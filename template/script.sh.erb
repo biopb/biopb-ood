@@ -164,13 +164,15 @@ CONTROL_PID=$!
 # What a 200 means depends on which biopb you are on, and waiting for one is
 # right either way:
 #
-#   0.13.0 and earlier   /readyz answered 200 unconditionally, including while
+#   before 0.13.0        /readyz answered 200 unconditionally, including while
 #                        it reported "degraded" with no backend connection at
 #                        all (biopb/biopb#755). The gate passed early — the
 #                        session was announced before the catalog existed.
-#   after #755           /readyz connects to Flight, answers from that health
+#   0.13.0 and later     /readyz connects to Flight, answers from that health
 #                        alone, and 503s until it says SERVING — so a 200 means
-#                        a data plane that is genuinely there.
+#                        a data plane that is genuinely there. This is the floor
+#                        this app requires anyway, so it is the normal case; the
+#                        row above only describes what a 0.12.x install did.
 #
 # SERVING is *not* a promise of a complete catalog. Under progressive discovery
 # (biopb/biopb#212) the server reaches SERVING immediately and populates in the

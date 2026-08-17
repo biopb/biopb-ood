@@ -185,17 +185,19 @@ Gate on HTTP 200 from `/data_plane/readyz`, and nothing else:
   sidecar **root**; only data endpoints are under `/api/*`. `/data_plane/api/readyz`
   is a 404 by design, not a bug.
 
-**What that 200 means changed under us**, and waiting for one is right either
-way. Through 0.13.0, `/readyz` answered 200 unconditionally — including while
-its body said `"status":"degraded"`, `"source_count":0`, with no backend
-connection at all, because it only *peeked* for a Flight client instead of
-making one (biopb/biopb#755). The gate therefore passed early: this app
-announced a ready session roughly four minutes before the UI could list a
-source, and the viewer sat on "Connecting to server…" in the meantime.
+**0.13.0 changed what that 200 means**, and waiting for one is right either way.
+Before it, `/readyz` answered 200 unconditionally — including while its body said
+`"status":"degraded"`, `"source_count":0`, with no backend connection at all,
+because it only *peeked* for a Flight client instead of making one
+(biopb/biopb#755). The gate passed early: on 0.12.0 this app announced a ready
+session roughly four minutes before the UI could list a source, and the viewer
+sat on "Connecting to server…" in the meantime.
 
-biopb's fix makes `/readyz` connect, answer from that health alone, and return
-**503 until Flight says `SERVING`** — so a 200 now means a data plane that is
-genuinely there, rather than a sidecar that merely answered.
+0.13.0 makes `/readyz` connect, answer from that health alone, and return **503
+until Flight says `SERVING`** — so a 200 means a data plane that is genuinely
+there, rather than a sidecar that merely answered. Since 0.13.0 is this app's
+floor, that is the behaviour you get; the paragraph above is only here to explain
+what an older install did.
 
 `SERVING` is not a promise of a complete catalog. Under progressive discovery
 (biopb/biopb#212) the server reaches `SERVING` immediately and populates behind
