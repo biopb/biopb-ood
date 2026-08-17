@@ -1,71 +1,38 @@
 <%-
   user       = ood_user
-  tunnel_cmd = "ssh -N -L #{port}:127.0.0.1:#{port} -J #{user}@#{login_host} #{user}@#{host}"
   # Land on the viewer, not the control dashboard: the viewer is what this app is
-  # for. `/viewer` is the SPA's declared route (no trailing slash), and the token
-  # goes in the query string — the app moves it to sessionStorage and strips it.
-  app_url    = "http://localhost:#{port}/viewer?token=#{biopb_token}"
+  # for. `/viewer` is the SPA's declared route (no trailing slash); under the
+  # prefix the control strips it back off, and the injected <base href> keeps the
+  # SPA's assets resolving from the session root either way.
+  app_url    = "#{url_prefix}/viewer?token=#{biopb_token}"
+  # A login host is only needed to *reach* the compute node. Blank means either
+  # the site's OnDemand config declares none or the user cleared it, so emit a
+  # direct ssh rather than a `-J @` that cannot work.
+  jump       = login_host.to_s.strip.empty? ? "" : "-J #{user}@#{login_host.strip} "
+  flight_cmd = "ssh -N -L #{grpc_port}:127.0.0.1:#{grpc_port} #{jump}#{user}@#{host}"
   uid        = "biopb-#{port}"
 -%>
 
-<div class="well well-sm" style="margin-bottom:10px">
-  <p style="margin:0">
-    The BioPB web UI runs on <strong>127.0.0.1</strong> on the compute node and is
-    not published to the network — it speaks plain HTTP, so exposing it would put
-    your access token on the wire in the clear. Reach it through an SSH tunnel:
-  </p>
-</div>
-
 <div style="margin-bottom:14px">
-  <label style="display:block;margin-bottom:4px">
-    <span class="label label-primary">Step 1</span>
-    Run this on <em>your own computer</em> and leave it running:
-  </label>
-  <div class="input-group">
-    <input type="text" readonly class="form-control" id="<%= uid %>-cmd"
-           style="font-family:monospace;font-size:12px"
-           value="<%= tunnel_cmd %>">
-    <span class="input-group-btn">
-      <button class="btn btn-default" type="button"
-              onclick="biopbCopy('<%= uid %>-cmd', this)">
-        <i class="fa fa-clipboard"></i> Copy
-      </button>
-    </span>
-  </div>
-  <p class="help-block" style="margin-top:4px">
-    It prints nothing and does not return — that is normal. Keep the terminal
-    open for as long as you are using the browser. On Windows, run it in
-    PowerShell or Windows Terminal.
-  </p>
-</div>
-
-<div style="margin-bottom:14px">
-  <label style="display:block;margin-bottom:4px">
-    <span class="label label-primary">Step 2</span>
-    Then open the browser UI:
-  </label>
   <a href="<%= app_url %>" target="_blank" rel="noopener"
-     class="btn btn-primary">
-    <i class="fa fa-microscope"></i> Open BioPB Image Browser
+     class="btn btn-primary btn-lg">
+    <i class="fa fa-microscope"></i> Connect to BioPB
   </a>
-  <button class="btn btn-default" type="button"
-          onclick="biopbCopy('<%= uid %>-url', this)">
-    <i class="fa fa-clipboard"></i> Copy link
-  </button>
-  <input type="hidden" id="<%= uid %>-url" value="<%= app_url %>">
-  <p class="help-block" style="margin-top:6px">
+  <p class="help-block" style="margin-top:8px">
     The link carries your access token; the app stores it and strips it from the
-    address bar. Open it rather than typing the address by hand — without the
-    token you land on the unlock page. If you get <em>connection refused</em>,
-    the tunnel in step 1 is not running.
+    address bar. Use the button rather than typing the address by hand — without
+    the token you land on the unlock page.
   </p>
-  <p class="help-block" style="margin-top:6px">
-    <strong>The viewer says "Connecting to server…" until the catalog is
-    built.</strong> That is the data plane indexing your directory, not a broken
-    connection — a few hundred sources takes several minutes on a small core
-    count, and there is no progress bar. The control dashboard, at
-    <code>http://localhost:<%= port %>/</code>, works immediately and shows the
-    server's state while you wait.
+  <p class="help-block">
+    <strong>The catalog fills in while you browse.</strong> The session opens as
+    soon as the server is serving, so the sidebar starts with
+    <em>"Indexing data folder…"</em> and grows as files are found — a few
+    hundred sources takes a few minutes on a small core count. Nothing is wrong
+    if an image you expect is not listed yet. (Launching with
+    <em>Watch the data directory</em> set to No instead indexes everything
+    first, so the session itself takes that long to come up.) The control
+    dashboard, at <code><%= url_prefix %>/</code>, shows the server's state
+    either way.
   </p>
 </div>
 
@@ -83,10 +50,32 @@
       <th>Arrow Flight</th>
       <td>
         <code>grpc://127.0.0.1:<%= grpc_port %></code>
-        <span class="help-block" style="display:inline;margin-left:6px">
-          for the Python/Java SDK or napari, over the same tunnel
-          (add <code>-L <%= grpc_port %>:127.0.0.1:<%= grpc_port %></code>)
-        </span>
+        <p class="help-block" style="margin:4px 0 6px">
+          For the Python/Java SDK or napari. Unlike the web UI, this one is not
+          published through the portal — it stays on the node's loopback, so it
+          needs an SSH tunnel. Run this on your own computer and leave it going:
+        </p>
+        <div class="input-group">
+          <input type="text" readonly class="form-control" id="<%= uid %>-flight"
+                 style="font-family:monospace;font-size:12px"
+                 value="<%= flight_cmd %>">
+          <span class="input-group-btn">
+            <button class="btn btn-default" type="button"
+                    onclick="biopbCopy('<%= uid %>-flight', this)">
+              <i class="fa fa-clipboard"></i> Copy
+            </button>
+          </span>
+        </div>
+        <p class="help-block" style="margin-top:4px">
+          Then connect to <code>grpc://localhost:<%= grpc_port %></code> with the
+          token from the link above.
+          <%- if jump.empty? -%>
+          If <code><%= host %></code> is not reachable from your machine, hop
+          through your login host by adding
+          <code>-J <%= user %>@&lt;login-host&gt;</code> — or set one in the
+          launch form and it will be filled in here.
+          <%- end -%>
+        </p>
       </td>
     </tr>
   </tbody>

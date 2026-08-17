@@ -12,22 +12,58 @@
 
 set -euo pipefail
 
-export PATH="${HOME}/.local/bin:${PATH}"
-
 STAGED_ROOT="${PWD}"
 CONFIG_FILE="${STAGED_ROOT}/biopb.json"
 
-# Per-session state (logs, pid files, session registry). Without this, two
-# concurrent sessions would fight over ~/.local/state/biopb.
-export XDG_STATE_HOME="${STAGED_ROOT}/state"
-mkdir -p "${XDG_STATE_HOME}"
+# --- where the install lives ---------------------------------------------- #
+#
+# Resolved from the environment as the *launching user* has it, and resolved
+# HERE, before the per-session XDG overrides below repoint the very variables
+# this reads. A site that ships biopb as a module may well set XDG_DATA_HOME, and
+# that has to keep pointing at the module's bundle.
+#
+# Both are overridable for the same reason: this branch needs an unreleased biopb
+# (biopb/biopb#731), so the CLI and the bundle may come from a build tree rather
+# than ~/.local — and they must come from the *same* tree.
+BIOPB_BIN_DIR="${BIOPB_BIN_DIR:-${HOME}/.local/bin}"
+WEBAPP_DIR="${BIOPB_WEBAPP_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/biopb/webapp}"
+export PATH="${BIOPB_BIN_DIR}:${PATH}"
+
+# --- the session's own XDG surface ---------------------------------------- #
+#
+# biopb honours exactly three XDG base dirs and resolves them at call time
+# (`biopb/_locations.py`): config, state, data. Giving the session its own has
+# two payoffs, and the second is what multi-user deployment needs:
+#
+#   1. Two concurrent sessions cannot collide — they would otherwise share one
+#      ~/.local/state/biopb for logs, the pid file, the credential, the session
+#      registry and the control's discovery record.
+#   2. A session's behaviour stops depending on whatever is in the launching
+#      user's home, and it writes nothing back there. One user's stale
+#      ~/.config/biopb (a legacy biopb.toml, say) can no longer change how their
+#      session behaves, and no user's leftover ~/.local/share/biopb/webapp can
+#      shadow the bundle the site chose above.
+#
+# The site's explicit choices still win: every path this app actually depends on
+# is passed on the command line (--config, --static-dir) or captured above,
+# before these take effect. What the overrides neutralize is biopb's *implicit*
+# fallbacks — which is the point.
+export XDG_STATE_HOME="${STAGED_ROOT}/state"    # logs, pid, credential, sessions
+export XDG_CONFIG_HOME="${STAGED_ROOT}/config"  # biopb.json, mcp-config.json
+export XDG_DATA_HOME="${STAGED_ROOT}/data"      # webapp / samples lookups
+mkdir -p "${XDG_STATE_HOME}" "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}"
 
 # The transcode cache goes on node-local disk, not NFS home: it is written
 # constantly, it is worthless after the job ends, and the file backend takes a
 # cross-process lock that two sessions sharing a directory would contend on.
-CACHE_DIR="${TMPDIR:-/tmp}/biopb-ood-${SLURM_JOB_ID:-$$}/cache"
-mkdir -p "${CACHE_DIR}"
-cleanup () { rm -rf "${TMPDIR:-/tmp}/biopb-ood-${SLURM_JOB_ID:-$$}" 2>/dev/null || true; }
+SESSION_TMP="${TMPDIR:-/tmp}/biopb-ood-${SLURM_JOB_ID:-$$}"
+CACHE_DIR="${SESSION_TMP}/cache"
+# biopb itself does not read XDG_CACHE_HOME — this is for the scientific stack
+# underneath it (font/JIT/plugin caches), which otherwise lands in NFS home and
+# is written by every concurrent session on the cluster at once.
+export XDG_CACHE_HOME="${SESSION_TMP}/xdg-cache"
+mkdir -p "${CACHE_DIR}" "${XDG_CACHE_HOME}"
+cleanup () { rm -rf "${SESSION_TMP}" 2>/dev/null || true; }
 trap cleanup EXIT
 
 # Java is only needed for the Bio-Formats fallback readers (.zvi, .ims, .oif).
@@ -42,7 +78,6 @@ if ! command -v biopb >/dev/null 2>&1; then
   exit 1
 fi
 
-WEBAPP_DIR="${HOME}/.local/share/biopb/webapp"
 if [[ ! -f "${WEBAPP_DIR}/index.html" ]]; then
   echo "ERROR: the web UI bundle is missing at ${WEBAPP_DIR}." >&2
   echo "Re-run the biopb installer to restore it." >&2
@@ -75,30 +110,46 @@ JSON
 
 echo "BioPB session starting on $(hostname)"
 echo "  data directory : <%= context.user_data_dir %>"
-echo "  control (UI)   : 127.0.0.1:${control_port}"
+echo "  control (UI)   : 0.0.0.0:${control_port}  (portal proxy target)"
+echo "  published at   : ${url_prefix}/"
 echo "  HTTP sidecar   : 127.0.0.1:${sidecar_port}"
 echo "  Arrow Flight   : 127.0.0.1:${grpc_port}"
 
-# Two CLI generations in the wild. The 0.12.0 release takes the control port
-# from BIOPB_CONTROL_PORT and the sidecar port from --web-port; builds carrying
-# biopb/biopb#614 replaced both with a single --base-port. Pick whichever this
-# install actually offers so the app survives a biopb upgrade.
-if biopb control run --help 2>/dev/null | grep -q -- '--base-port'; then
-  echo "  (using --base-port interface)"
-  set -- --base-port "${base_port}" --grpc-bind 127.0.0.1 --no-tls
-else
-  echo "  (using BIOPB_CONTROL_PORT + --web-port interface)"
-  export BIOPB_CONTROL_PORT="${control_port}"
-  set -- --web-port "${sidecar_port}"
+# This branch serves the UI through OnDemand's proxy, which requires a biopb
+# carrying --url-prefix (biopb/biopb#731). Without it the control emits a shell
+# whose asset and API URLs are anchored at the *portal* root, so the page would
+# load nothing behind the proxy — and it would fail as a blank screen rather than
+# as an error. Refuse up front instead.
+if ! biopb control run --help 2>/dev/null | grep -q -- '--url-prefix'; then
+  echo "ERROR: this biopb install does not support --url-prefix." >&2
+  echo "       The portal-proxied app needs biopb/biopb#731 (currently on the" >&2
+  echo "       biopb dev branch, not in a release). Either upgrade biopb, or" >&2
+  echo "       use the main branch of this app, which reaches the same stack" >&2
+  echo "       over an SSH tunnel and works on 0.12.0." >&2
+  exit 1
 fi
 
+# The OnDemand proxy runs on the portal's web node and connects to this compute
+# node over the network, so the control cannot stay on loopback the way biopb's
+# default assumes. BIOPB_CONTROL_HOST is biopb's documented escape hatch for the
+# control bind (`_control_bind_endpoint`: "env still wins"). The access token
+# gates it; the sidecar and the Flight plane are unaffected and stay on 127.0.0.1.
+#
+# The cost, stated plainly: portal -> compute node is plain HTTP, so the token
+# crosses the cluster network in the clear (biopb/biopb#614 — the control has no
+# TLS). Browser -> portal is HTTPS. This is the same posture as every OnDemand
+# Jupyter app, and it is the reason the tunnel variant on `main` still exists.
+export BIOPB_CONTROL_HOST=0.0.0.0
 export BIOPB_TENSOR_TOKEN="${biopb_token}"
 
 biopb control run \
   --config "${CONFIG_FILE}" \
   --static-dir "${WEBAPP_DIR}" \
-  --log-level INFO \
-  "$@" &
+  --base-port "${base_port}" \
+  --grpc-bind 127.0.0.1 \
+  --no-tls \
+  --url-prefix "${url_prefix}" \
+  --log-level INFO &
 CONTROL_PID=$!
 
 # Wait for the browser origin to be serving before declaring the session ready.
@@ -108,14 +159,43 @@ CONTROL_PID=$!
 # control's prefix-stripping /data_plane mount. Do NOT gate on the control's own
 # data_plane.state=="serving": that reflects a TCP probe of the Flight port,
 # which comes up about two seconds before the sidecar binds, so the UI would
-# still 502. Do not require the body's "ready":true either — the sidecar answers
-# before it has connected to Flight, so it reports "degraded"/source_count 0 for
-# a moment on a perfectly healthy start.
-echo -n "Waiting for the data plane"
+# still 502.
+#
+# What a 200 means depends on which biopb you are on, and waiting for one is
+# right either way:
+#
+#   before 0.13.0        /readyz answered 200 unconditionally, including while
+#                        it reported "degraded" with no backend connection at
+#                        all (biopb/biopb#755). The gate passed early — the
+#                        session was announced before the catalog existed.
+#   0.13.0 and later     /readyz connects to Flight, answers from that health
+#                        alone, and 503s until it says SERVING — so a 200 means
+#                        a data plane that is genuinely there. This is the floor
+#                        this app requires anyway, so it is the normal case; the
+#                        row above only describes what a 0.12.x install did.
+#
+# SERVING is *not* a promise of a complete catalog. Under progressive discovery
+# (biopb/biopb#212) the server reaches SERVING immediately and populates in the
+# background, carrying freshness in full_scan_in_progress and
+# last_full_scan_finished_at; a client that needs the whole catalog waits on
+# those, not on SERVING.
+#
+# What decides which one you get here is this app's own form. "Watch the data
+# directory" defaults to Yes, which monitors the directory: the server binds and
+# reaches SERVING at once, and the catalog fills behind it — so this gate
+# normally clears in seconds and the UI opens on a catalog still growing. Set it
+# to No and the sources become static, which the launch path registers *before*
+# it binds anything: nothing answers at all until the walk finishes, and the
+# first 200 then does come with a complete catalog.
+#
+# The budget below is sized for that second case, where the walk is minutes on a
+# large tree and nothing is listening throughout. Timing out is not fatal — the
+# session stays up.
+echo "Waiting for the data plane (seconds while watching the directory; up to 15"
+echo "minutes if you chose to index everything before opening)"
 READY=0
-for _ in $(seq 1 150); do
+for attempt in $(seq 1 450); do
   if ! kill -0 "${CONTROL_PID}" 2>/dev/null; then
-    echo
     echo "ERROR: the control plane exited during startup." >&2
     wait "${CONTROL_PID}" || true
     exit 1
@@ -127,16 +207,38 @@ for _ in $(seq 1 150); do
     READY=1
     break
   fi
+  # A line a minute rather than 450 dots, and it names the last status: 503 is
+  # "still scanning", anything else (000, 502) is "the sidecar is not answering
+  # yet". Straight to the job output, which is where anyone debugging looks.
+  if (( attempt % 30 == 0 )); then
+    echo "  still waiting after $(( attempt * 2 / 60 )) min (last /readyz: ${code:-none})"
+  fi
   sleep 2
-  echo -n "."
 done
-echo
 
 if [[ "${READY}" == "1" ]]; then
-  echo "BioPB is ready. Open the session card for the SSH tunnel command."
+  # The readiness gate above probes the *unprefixed* path over loopback, which a
+  # prefixed control still answers. That is not what the portal will ask for, so
+  # confirm the published document once: the shell must come back carrying the
+  # <base href> the SPA reads its prefix from. A 200 without it means the bundle
+  # predates biopb/biopb#731 even though the CLI accepted the flag, which would
+  # otherwise surface as a blank page with no explanation.
+  shell="$(curl -s -m 5 "http://127.0.0.1:${control_port}${url_prefix}/" 2>/dev/null || true)"
+  if grep -q "<base href=\"${url_prefix}/\">" <<<"${shell}"; then
+    echo "BioPB is ready, published at ${url_prefix}/"
+  else
+    echo "WARNING: the control is up but the page served at ${url_prefix}/ carries" >&2
+    echo "         no <base href>, so the browser will resolve its assets at the" >&2
+    echo "         portal root and the UI will come up blank. The installed web" >&2
+    echo "         bundle is probably older than the CLI — reinstall biopb so the" >&2
+    echo "         two match." >&2
+  fi
 else
-  echo "WARNING: the data plane did not report ready in time; leaving the" >&2
-  echo "         session up anyway so you can inspect the log above." >&2
+  echo "WARNING: the data plane did not report ready within 15 minutes." >&2
+  echo "         The session is left up anyway — on a large data directory the" >&2
+  echo "         initial scan can simply take longer than the wait, and the UI" >&2
+  echo "         becomes usable as soon as it finishes. Check the log above, and" >&2
+  echo "         /data_plane/readyz for a backend_error." >&2
 fi
 
 wait "${CONTROL_PID}"

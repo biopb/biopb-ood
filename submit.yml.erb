@@ -14,6 +14,10 @@ batch_connect:
     - sidecar_port
     - grpc_port
     - ood_user
+    # The portal path this session is published at. Derived in before.sh and
+    # passed to both the launcher (--url-prefix) and the card (the link target),
+    # so the address biopb was told and the address the button opens cannot drift.
+    - url_prefix
 
 script:
   job_name: "biopb-browser"

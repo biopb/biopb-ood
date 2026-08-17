@@ -15,17 +15,65 @@ cluster:
   <%- OodAppkit.clusters.select(&:job_allow?).sort_by(&:id).each do |c| -%>
   - "<%= c.id %>"
   <%- end -%>
+<%-
+  # Default for `login_host` below, read from OnDemand's own cluster config
+  # (`v2.login.host` in /etc/ood/config/clusters.d/<id>.yml) instead of naming a
+  # site here. Same source the portal's Shell Access app uses.
+  #
+  # Fail-safe on purpose. A form that raises while rendering takes the whole
+  # app down with it, and this is only the default for one editable text field —
+  # so no clusters, no login section, or an OodAppkit that does not expose it all
+  # degrade to blank rather than to a broken form. Blank is handled: the session
+  # card then shows a direct ssh to the compute node, with a note about adding
+  # -J yourself.
+  #
+  # Multi-cluster sites: this takes the first job-allowed cluster, and the form
+  # renders once, so the default cannot follow the cluster menu. It stays
+  # editable per session; a site that wants it to track the selection can drive
+  # it from OnDemand's `data-set-*` option attributes.
+  biopb_login_host = begin
+    c = OodAppkit.clusters.select(&:job_allow?).sort_by(&:id).first
+    (c && c.login && c.login.host).to_s
+  rescue StandardError
+    ""
+  end
+
+  # Default for `user_data_dir`. `~/data` if the user keeps one, otherwise the
+  # home directory itself — always a real, readable path, so the field is never
+  # empty on a first launch. (After that, OnDemand's per-user form cache wins:
+  # this default is only ever seen by someone who has not launched the app
+  # before, or whose cache file has been removed.)
+  #
+  # Same fail-safe shape as above: a raising form.yml takes the whole app down,
+  # and this is one text field's starting value. A stat that fails — an
+  # unreachable NFS home, a permission — degrades to the home path rather than
+  # to a broken form.
+  biopb_home = CurrentUser.home.to_s
+  biopb_data_dir = begin
+    candidate = File.join(biopb_home, "data")
+    File.directory?(candidate) ? candidate : biopb_home
+  rescue StandardError
+    biopb_home
+  end
+-%>
 
 attributes:
   user_data_dir:
     label: "Data directory"
     widget: "path_selector"
-    directory: "<%= CurrentUser.home %>"
+    directory: "<%= biopb_home %>"
+    value: "<%= biopb_data_dir %>"
     show_files: false
     help: |
       The folder BioPB will index and serve. Everything under it is scanned
       recursively. Point it at the parent of your image folders — no staging,
       conversion or import step is needed; files stay in their original format.
+
+      Narrow it if you can. Your whole home works, and is the default when there
+      is nothing more specific to offer, but then the scan walks everything under
+      it — code checkouts, environments, caches — to find the images. A folder
+      that holds only data indexes faster and, with watching on, gives the
+      filesystem watcher far less to poll.
 
   bc_num_hours:
     label: "Hours"
@@ -68,14 +116,24 @@ attributes:
   monitor_sources:
     label: "Watch the data directory for changes"
     widget: "select"
-    value: "false"
+    value: "true"
     options:
-      - ["No  — index once at startup (recommended)", "false"]
-      - ["Yes — re-scan continuously for new files", "true"]
+      - ["Yes — open now, index in the background (recommended)", "true"]
+      - ["No  — index everything before opening", "false"]
     help: |
-      Live monitoring polls the filesystem. On a large or slow shared filesystem
-      that costs real I/O, so leave it off unless you are actively writing new
-      data into this folder during the session.
+      This decides *when the session opens*, not just whether new files are
+      noticed.
+
+      Yes: the server starts serving immediately and the catalog fills in behind
+      you, so the session is usable in seconds. Images appear as they are found,
+      and files you add mid-session show up too. The cost is that watching polls
+      the filesystem, which is real I/O on a large or slow shared filesystem.
+
+      No: every file is indexed before the server accepts its first connection,
+      so nothing is served — and the session does not come up — until the whole
+      directory has been walked. That is minutes on a large tree. Pick it when
+      you would rather wait once than have the catalog shift under you, or when
+      the folder is on a filesystem you would rather not have polled.
 
   qos:
     label: "QOS"
@@ -91,10 +149,14 @@ attributes:
 
   login_host:
     label: "SSH login host"
-    value: "mantis-submit.cam.uchc.edu"
+    value: "<%= biopb_login_host %>"
     help: |
-      The host you normally SSH into from off-campus. Used only to build the
-      tunnel command shown on the session card.
+      The host you normally SSH into. Prefilled from your cluster's OnDemand
+      configuration; correct it if your site uses a different name from off-site.
+
+      Used for one thing only: the Arrow Flight tunnel command on the session
+      card, for the Python/Java SDK and napari. The web UI does not need it — the
+      portal proxies that. Leave it blank if you reach compute nodes directly.
 
 form:
   - cluster

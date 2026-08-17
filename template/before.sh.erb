@@ -13,22 +13,24 @@
 # BIOPB_CONTROL_PORT + --web-port, while newer builds take a single --base-port.
 # See template/script.sh.erb.
 #
-# All three bind 127.0.0.1 on the compute node. The control plane is plaintext
-# HTTP and has no TLS support, so publishing it would put the access token on
-# the wire in the clear (biopb/biopb#614). It stays on loopback and the browser
-# reaches it through the SSH tunnel shown on the session card.
+# The control plane is published through OnDemand's own proxy, so it binds the
+# node's interfaces rather than loopback (see template/script.sh.erb). The
+# sidecar and the Flight plane stay on 127.0.0.1 — nothing outside the node
+# talks to them directly.
 
-# --- what this node is called ------------------------------------------------ #
+# --- what the portal will call this node ------------------------------------ #
 # OnDemand sets `host=$(hostname)` just before sourcing this file — the node's
-# *short* name, which is fine on the cluster and often not resolvable off it.
-# Prefer the fully qualified name when the node reports one, so the ssh command
-# on the session card works from a laptop too. `host` is exported and read
-# afterwards by connection.yml, so fixing it here fixes every consumer at once.
-# (On the dev branch this is load-bearing: the portal matches the proxy prefix
-# against `host_regex`, and a domain-qualified regex never matches a short name.)
+# *short* name. Whether that works depends on the portal's `host_regex` in
+# ood_portal.yml: a site that qualifies it with a domain never matches a short
+# name, and the request falls past the proxy to Apache's document root, so the
+# session card leads to a bare 404 with no hint that the name was the problem.
 #
-# Bounded: `hostname -f` consults the resolver, and a wedged one would otherwise
-# hang the whole job here, before anything has been started.
+# Prefer the fully qualified name whenever the node reports one; keep
+# OnDemand's value if it does not. `host` is exported and read afterwards by
+# both connection.yml and the url_prefix below, so fixing it here fixes every
+# consumer at once.
+# Bounded: `hostname -f` consults the resolver, and a wedged one would
+# otherwise hang the whole job here, before anything has been started.
 fqdn="$(timeout 5 hostname -f 2>/dev/null || true)"
 case "${fqdn}" in
   *.*) host="${fqdn}" ;;
@@ -62,13 +64,26 @@ export sidecar_port=$((base_port + 4))
 export grpc_port=$((base_port + 5))
 
 # OnDemand's canonical connection port. The control plane is the only listener a
-# human ever talks to, so that is what the session card tunnels to.
+# human ever talks to, so that is what the portal proxies to.
 export port="${control_port}"
 
+# Where the portal publishes this session: OnDemand's /node/<host>/<port>/ route
+# passes the full, untouched path through to us, so biopb has to be *told* the
+# prefix it is serving under (biopb/biopb#731). It cannot be inferred from a
+# request header — a caller-controlled `<base href>` would repoint every relative
+# URL in the SPA — and it cannot be baked at build time, because it carries this
+# job's node and port. Derived once, here, and passed to both the launcher (as
+# --url-prefix) and the session card (as the link), so the two cannot disagree.
+#
+# `/node` is OnDemand's default node_uri. If your portal sets a different one in
+# ood_portal.yml, change it here.
+export url_prefix="/node/${host}/${port}"
+
 # Gates the web UI and the data API. Alphanumeric from create_passwd, which
-# satisfies biopb's 16-128 URL-safe character rule. A token matters even on a
-# loopback bind here: compute nodes are shared, so without one any other user on
-# this node could reach the data API over 127.0.0.1.
+# satisfies biopb's 16-128 URL-safe character rule. It is the *only* thing
+# standing between this session and anyone else: the control port is open on the
+# node's interfaces so the portal can proxy to it, and even the loopback-bound
+# sidecar and Flight ports are reachable by every other user on this shared node.
 export biopb_token="$(create_passwd 32)"
 
 # Copied into connection.yml for the session card (see submit.yml.erb). The
