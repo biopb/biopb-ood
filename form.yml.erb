@@ -37,18 +37,43 @@ cluster:
   rescue StandardError
     ""
   end
+
+  # Default for `user_data_dir`. `~/data` if the user keeps one, otherwise the
+  # home directory itself — always a real, readable path, so the field is never
+  # empty on a first launch. (After that, OnDemand's per-user form cache wins:
+  # this default is only ever seen by someone who has not launched the app
+  # before, or whose cache file has been removed.)
+  #
+  # Same fail-safe shape as above: a raising form.yml takes the whole app down,
+  # and this is one text field's starting value. A stat that fails — an
+  # unreachable NFS home, a permission — degrades to the home path rather than
+  # to a broken form.
+  biopb_home = CurrentUser.home.to_s
+  biopb_data_dir = begin
+    candidate = File.join(biopb_home, "data")
+    File.directory?(candidate) ? candidate : biopb_home
+  rescue StandardError
+    biopb_home
+  end
 -%>
 
 attributes:
   user_data_dir:
     label: "Data directory"
     widget: "path_selector"
-    directory: "<%= CurrentUser.home %>"
+    directory: "<%= biopb_home %>"
+    value: "<%= biopb_data_dir %>"
     show_files: false
     help: |
       The folder BioPB will index and serve. Everything under it is scanned
       recursively. Point it at the parent of your image folders — no staging,
       conversion or import step is needed; files stay in their original format.
+
+      Narrow it if you can. Your whole home works, and is the default when there
+      is nothing more specific to offer, but then the scan walks everything under
+      it — code checkouts, environments, caches — to find the images. A folder
+      that holds only data indexes faster and, with watching on, gives the
+      filesystem watcher far less to poll.
 
   bc_num_hours:
     label: "Hours"

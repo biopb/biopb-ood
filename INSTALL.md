@@ -224,7 +224,8 @@ copying a snippet.
 |---|---|---|
 | Node URI | `template/before.sh.erb` builds `/node/$host/$port` | must match the portal's `node_uri`; a mismatch 404s every request rather than failing visibly |
 | Node name form | `template/before.sh.erb`, the `hostname -f` block | the prefix must use the name the portal's `host_regex` accepts. Qualified is the common case and the default here; a site whose regex wants short names should delete the block. Wrong form = Apache 404, nothing reaches the node |
-| Data directory root | `form.yml.erb`, `directory: CurrentUser.home` | **widen this for group shares** — as shipped, users can browse only their own home |
+| Data directory root | `form.yml.erb`, `directory:` | **widen this for group shares** — as shipped, users can browse only their own home |
+| Data directory default | `form.yml.erb`, `biopb_data_dir` in the ERB preamble | `~/data` when the user has one, else their home. Point it at your site's convention (a group share, `/scratch/$USER`) — home is the safe answer, not a good one, since the scan then walks everything under it |
 | QOS | form field, default `general` | change the default, or clear it to submit with no `--qos` |
 | Cluster | derived from `OodAppkit.clusters` | no edit needed |
 | Login host | derived from the cluster's `v2.login.host` | no edit needed; used only for the Arrow Flight tunnel |
