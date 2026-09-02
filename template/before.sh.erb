@@ -157,7 +157,46 @@ export url_prefix="/node/${host}/${port}"
 # standing between this session and anyone else: the control port is open on the
 # node's interfaces so the portal can proxy to it, and even the loopback-bound
 # sidecar and Flight ports are reachable by every other user on this shared node.
-export biopb_token="$(create_passwd 32)"
+#
+# The token PERSISTS across sessions, so a token copied off the session card into
+# an SDK script or a napari profile keeps working after a relaunch. That is the
+# point of one server per user: the endpoint moves between nodes, but the
+# credential does not have to.
+#
+# It is kept in a directory this app owns, NOT in biopb's own
+# ~/.local/state/biopb/tensor-server.token. biopb writes that file on serve and
+# *removes* it on a clean stop (`biopb._credentials.remove_credential`, the same
+# publish/retract lifetime as control.json), so reading it back would hand out a
+# fresh token after every tidy shutdown — exactly the instability this avoids.
+#
+# The trade, stated plainly: a leaked token stays valid until it is rotated,
+# where a per-session token expired on its own. Rotate by deleting the file —
+# the next launch mints a new one, and every client holding the old one stops.
+BIOPB_OOD_STATE="${BIOPB_OOD_STATE_DIR:-${HOME}/.local/state/biopb-ood}"
+BIOPB_TOKEN_FILE="${BIOPB_OOD_STATE}/token"
+
+biopb_token=""
+if [[ -r "${BIOPB_TOKEN_FILE}" ]]; then
+  biopb_token="$(tr -d '[:space:]' < "${BIOPB_TOKEN_FILE}" || true)"
+  # A truncated or hand-edited file would otherwise fail biopb's own validation
+  # at startup, which is a confusing place to discover it. Check here and re-mint.
+  if [[ ! "${biopb_token}" =~ ^[A-Za-z0-9._~-]{16,128}$ ]]; then
+    echo "Note: ${BIOPB_TOKEN_FILE} does not hold a usable token; minting a new one." >&2
+    biopb_token=""
+  fi
+fi
+
+if [[ -z "${biopb_token}" ]]; then
+  biopb_token="$(create_passwd 32)"
+  mkdir -p "${BIOPB_OOD_STATE}"
+  chmod 700 "${BIOPB_OOD_STATE}" 2>/dev/null || true
+  # mktemp creates 0600, so the secret is never briefly world-readable, and the
+  # rename is atomic so a concurrent reader never sees a half-written token.
+  tmp="$(mktemp "${BIOPB_OOD_STATE}/.token.XXXXXX")"
+  printf '%s' "${biopb_token}" > "${tmp}"
+  mv -f "${tmp}" "${BIOPB_TOKEN_FILE}"
+fi
+export biopb_token
 
 # Copied into connection.yml for the session card (see submit.yml.erb). The
 # username is resolved here rather than in the view, so the card does not depend

@@ -258,6 +258,14 @@ leaves it behind, and a record-based guard would then refuse to start forever
 with no way for the user to clear it from the portal. When no sibling job is
 running, a leftover record is treated as stale and removed.
 
+The access token persists across sessions for the same reason. It is kept in
+`~/.local/state/biopb-ood/token` (mode `600`), owned by this app rather than read
+back from biopb's own `~/.local/state/biopb/tensor-server.token` — biopb writes
+that file on serve and *removes* it on a clean stop, so reading it back would
+hand out a fresh token after every tidy shutdown. A token copied off the session
+card therefore keeps working after a relaunch, at the cost that a leaked one
+stays valid until rotated: delete the file and the next launch mints a new one.
+
 What this gives up is two concurrent sessions with different data directories or
 different resource shapes. For an image browser that is a thin use case, and it
 buys away the whole class of shared-state problems above.
