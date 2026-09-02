@@ -198,9 +198,11 @@ module load biopb >/dev/null 2>&1 || true
 Or skip the module and edit the two defaults in `script.sh.erb` directly — a
 system app is site-owned, so hardcoding site paths there is legitimate.
 
-A site that sets `XDG_DATA_HOME` in the modulefile instead works too: the app
-resolves the bundle location *before* it redirects the XDG dirs per session, so a
-module-provided `XDG_DATA_HOME` is honored.
+A site that sets `BIOPB_DATA_HOME` in the modulefile instead works too: the app
+resolves the bundle location from the launching user's environment, so a
+module-provided `BIOPB_DATA_HOME` is honored (a legacy `XDG_DATA_HOME` is still
+read as a fallback here, though biopb itself no longer honors it — see
+biopb/biopb#790).
 
 ### 3. Install the app system-wide
 

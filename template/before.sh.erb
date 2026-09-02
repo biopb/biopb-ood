@@ -1,3 +1,76 @@
+# --- one session per user --------------------------------------------------- #
+#
+# biopb's state tree is a singleton by construction: one control.pid, one
+# control.json, one credential, one session registry, and a CLI of
+# control start/stop/status. This app used to hand every session its own tree to
+# work around that. Serving one server per user instead makes the tree in NFS
+# home simply correct — and because ~/.local is mounted on every node, the TLS
+# certificate, the access token and the discovery record become stable across
+# sessions AND across nodes for free. That is the whole point of the change: the
+# cert problem stops needing a solution.
+#
+# Slurm is the authority for "is another session alive", not control.json. The
+# record is published on serve and retracted only on a *clean* stop, so scancel,
+# an OOM kill or a node failure leaves it behind — a record-based guard would
+# refuse to start forever, and the user could not fix it from the portal. Slurm
+# knows the job is gone. The record is consulted only for *where* to send them.
+BIOPB_JOB_NAME="biopb-browser"
+BIOPB_STATE="${HOME}/.local/state/biopb"
+
+# Every other live job of this app, one "<jobid> <node>" per line. COMPLETING is
+# included deliberately: such a job still holds its port and its state tree.
+others="$(squeue -h -u "${USER}" -n "${BIOPB_JOB_NAME}" \
+            -t RUNNING,CONFIGURING,COMPLETING -o '%i %N' 2>/dev/null \
+          | awk -v me="${SLURM_JOB_ID:-0}" '$1 != me' || true)"
+
+# Two launches a second apart would each see the other, so a plain "refuse if any
+# other exists" makes both yield and neither start. Slurm job ids are monotonic,
+# so let the elder win: each side applies the same tie-break to the same list and
+# exactly one proceeds. No lock file, and in particular no flock on NFS.
+elder="$(awk -v me="${SLURM_JOB_ID:-0}" '$1 < me {print; exit}' <<<"${others}" || true)"
+
+if [[ -n "${elder}" ]]; then
+  elder_id="${elder%% *}"
+  elder_node="${elder##* }"
+
+  # Qualify the node the same way this file qualifies its own, or the portal's
+  # host_regex may not match a short name and the link 404s past the proxy.
+  our_fqdn="$(timeout 5 hostname -f 2>/dev/null || true)"
+  case "${our_fqdn}" in
+    *.*) elder_node="${elder_node}.${our_fqdn#*.}" ;;
+  esac
+
+  # The port, and ONLY the port, comes from the discovery record: its "host" is
+  # the bind address (0.0.0.0 on this branch), which is not a name anything can
+  # dial. The node name comes from Slurm above.
+  elder_port=""
+  if [[ -r "${BIOPB_STATE}/control.json" ]]; then
+    elder_port="$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1]))["port"])
+except Exception: pass' "${BIOPB_STATE}/control.json" 2>/dev/null || true)"
+  fi
+
+  echo "ERROR: you already have a BioPB session running (job ${elder_id} on ${elder_node})." >&2
+  echo "       One server per user: this session would fight it for the same" >&2
+  echo "       credential, log and session registry in ${BIOPB_STATE}." >&2
+  if [[ -n "${elder_port}" ]]; then
+    echo "       Open the running one at /node/${elder_node}/${elder_port}/" >&2
+  else
+    echo "       It has not published its endpoint yet — give it a moment, then" >&2
+    echo "       open it from My Interactive Sessions." >&2
+  fi
+  echo "       To start fresh instead, delete that session and relaunch." >&2
+  exit 1
+fi
+
+# No live sibling. A record still sitting here is therefore from a job that did
+# not stop cleanly; drop it so nothing downstream (and no client discovering
+# through it) is pointed at a dead endpoint. biopb republishes on serve.
+if [[ -e "${BIOPB_STATE}/control.json" ]]; then
+  echo "Note: removing a stale control record left by a previous session." >&2
+  rm -f "${BIOPB_STATE}/control.json"
+fi
+
 # Allocate the ports and the access token for this session.
 #
 # BioPB runs three listeners and derives them from one base port, the same

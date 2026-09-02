@@ -17,41 +17,45 @@ CONFIG_FILE="${STAGED_ROOT}/biopb.json"
 
 # --- where the install lives ---------------------------------------------- #
 #
-# Resolved from the environment as the *launching user* has it, and resolved
-# HERE, before the per-session XDG overrides below repoint the very variables
-# this reads. A site that ships biopb as a module may well set XDG_DATA_HOME, and
-# that has to keep pointing at the module's bundle.
+# Resolved from the environment as the *launching user* has it. A site that
+# ships biopb as a module may well set BIOPB_DATA_HOME (or XDG_DATA_HOME on an
+# older module), and that has to keep pointing at the module's bundle.
 #
-# Both are overridable for the same reason: this branch needs an unreleased biopb
-# (biopb/biopb#731), so the CLI and the bundle may come from a build tree rather
-# than ~/.local — and they must come from the *same* tree.
+# Both are overridable for the same reason: the CLI and the bundle may come from
+# a build tree rather than ~/.local — and they must come from the *same* tree.
 BIOPB_BIN_DIR="${BIOPB_BIN_DIR:-${HOME}/.local/bin}"
-WEBAPP_DIR="${BIOPB_WEBAPP_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/biopb/webapp}"
+WEBAPP_DIR="${BIOPB_WEBAPP_DIR:-${BIOPB_DATA_HOME:-${XDG_DATA_HOME:-${HOME}/.local/share}}/biopb/webapp}"
 export PATH="${BIOPB_BIN_DIR}:${PATH}"
 
-# --- the session's own XDG surface ---------------------------------------- #
+# --- state lives in the user's home, on purpose ---------------------------- #
 #
-# biopb honours exactly three XDG base dirs and resolves them at call time
-# (`biopb/_locations.py`): config, state, data. Giving the session its own has
-# two payoffs, and the second is what multi-user deployment needs:
+# This app runs ONE server per user (see the guard in before.sh.erb), so biopb's
+# own base dirs are left exactly where biopb puts them: ~/.config/biopb,
+# ~/.local/state/biopb, ~/.local/share/biopb. Nothing is redirected per session.
 #
-#   1. Two concurrent sessions cannot collide — they would otherwise share one
-#      ~/.local/state/biopb for logs, the pid file, the credential, the session
-#      registry and the control's discovery record.
-#   2. A session's behaviour stops depending on whatever is in the launching
-#      user's home, and it writes nothing back there. One user's stale
-#      ~/.config/biopb (a legacy biopb.toml, say) can no longer change how their
-#      session behaves, and no user's leftover ~/.local/share/biopb/webapp can
-#      shadow the bundle the site chose above.
+# That is a deliberate reversal. Giving each session its own tree fought biopb's
+# design — the state tree is a singleton by construction (one control.pid, one
+# control.json, one credential, one session registry, and a CLI of
+# control start/stop/status) — and it cost more than it bought. Because ~/.local
+# is the same NFS tree on every node, keeping state in home means the TLS
+# certificate, the access token and the discovery record are stable across
+# sessions AND across nodes at no cost: the cert is minted once and reused
+# wherever the scheduler puts the job, instead of being re-minted per session and
+# breaking every client's TOFU pin (biopb/biopb#913).
 #
-# The site's explicit choices still win: every path this app actually depends on
-# is passed on the command line (--config, --static-dir) or captured above,
-# before these take effect. What the overrides neutralize is biopb's *implicit*
-# fallbacks — which is the point.
-export XDG_STATE_HOME="${STAGED_ROOT}/state"    # logs, pid, credential, sessions
-export XDG_CONFIG_HOME="${STAGED_ROOT}/config"  # biopb.json, mcp-config.json
-export XDG_DATA_HOME="${STAGED_ROOT}/data"      # webapp / samples lookups
-mkdir -p "${XDG_STATE_HOME}" "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}"
+# What is still passed explicitly, and must stay that way: --config (the staged
+# biopb.json this script writes, so the launch form is the only thing that
+# decides the data directory) and --static-dir (the bundle captured above). Those
+# two are what keep a user's leftover ~/.config/biopb or ~/.local/share/biopb
+# from changing how a session behaves.
+#
+# The one thing this gives up: the control's log now lands in
+# ~/.local/state/biopb/logs on NFS home rather than node-local disk. `biopb
+# control run` hardcodes that path (biopb/cli.py, server_log=_get_log_file()) and
+# exposes no flag for it. It IS movable — the argparse entry point
+# `python -m biopb_control run` takes --server-log — but that means launching
+# through the module rather than the CLI, so it is left alone for now: at
+# --log-level INFO with a single server per user the volume is small.
 
 # The transcode cache goes on node-local disk, not NFS home: it is written
 # constantly, it is worthless after the job ends, and the file backend takes a
@@ -60,7 +64,9 @@ SESSION_TMP="${TMPDIR:-/tmp}/biopb-ood-${SLURM_JOB_ID:-$$}"
 CACHE_DIR="${SESSION_TMP}/cache"
 # biopb itself does not read XDG_CACHE_HOME — this is for the scientific stack
 # underneath it (font/JIT/plugin caches), which otherwise lands in NFS home and
-# is written by every concurrent session on the cluster at once.
+# is written by every concurrent session on the cluster at once. It is an XDG
+# name because its audience is matplotlib/numba/Qt, not biopb — biopb's own dirs
+# are BIOPB_* and are deliberately left alone above.
 export XDG_CACHE_HOME="${SESSION_TMP}/xdg-cache"
 mkdir -p "${CACHE_DIR}" "${XDG_CACHE_HOME}"
 cleanup () { rm -rf "${SESSION_TMP}" 2>/dev/null || true; }

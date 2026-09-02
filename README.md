@@ -158,14 +158,15 @@ Four values are site-dependent. The first two can actually break the app.
 
 ## How a session works
 
-1. `before.sh.erb` finds a base port whose `+3/+4/+5` offsets are all free,
+1. `before.sh.erb` refuses to start if this user already has a session running
+   (below), then finds a base port whose `+3/+4/+5` offsets are all free,
    generates a 32-character access token, and derives the portal prefix
    `/node/$host/$port`.
 2. `script.sh.erb` writes a per-session `biopb.json`, points the transcode cache
    at node-local `/tmp` (not NFS home — it is write-heavy, disposable, and the
-   file backend takes a cross-process lock), gives the session its own XDG tree
-   (below), and runs `biopb control run` with `--url-prefix` and a `0.0.0.0`
-   control bind.
+   file backend takes a cross-process lock), leaves biopb's own base dirs in the
+   user's home (below), and runs `biopb control run` with `--url-prefix` and a
+   `0.0.0.0` control bind.
 3. It waits for **HTTP 200 on `/data_plane/readyz`** (up to 15 minutes — see
    below for what that 200 does and does not promise), then confirms the
    document served at the prefix actually carries a `<base href>` — a CLI new
@@ -226,36 +227,67 @@ A cold start on a small dataset is ~8 seconds either way.
 
 ## Isolation and multi-tenancy
 
-Ports are allocated per session, so several sessions can share a compute node.
-The access token is what keeps one session's data out of another's reach: the
-control port is open on the node's interfaces, and the sidecar and Flight ports
-— though loopback-only — are reachable by every other user logged in to the same
+### One server per user
+
+A user gets **one** BioPB session at a time. `before.sh.erb` refuses to start a
+second one, and biopb's base dirs are therefore left where biopb puts them —
+`~/.config/biopb`, `~/.local/state/biopb`, `~/.local/share/biopb` — with nothing
+redirected per session.
+
+This reverses an earlier design that gave each session its own copy of those
+trees. That fought biopb, whose state tree is a singleton by construction: one
+`control.pid`, one `control.json`, one credential, one session registry, and a
+CLI of `control start` / `stop` / `status`. Keeping state in home also makes
+`~/.local` being the same NFS tree on every node work *for* the deployment: the
+TLS certificate, the access token and the discovery record become stable across
+sessions and across nodes for free. A per-session state tree instead re-mints the
+certificate on every launch, which breaks every client's TOFU pin
+(biopb/biopb#913).
+
+The guard uses Slurm as its authority, not `control.json`:
+
+| | |
+|---|---|
+| liveness | `squeue -u $USER -n biopb-browser`, counting `RUNNING`, `CONFIGURING` and `COMPLETING` |
+| where to send the user | the node from Slurm, the port from `control.json` — that record's `host` is the *bind* address (`0.0.0.0`), not a routable name |
+| simultaneous launches | the lower job id wins; both sides apply the same tie-break to the same list, so exactly one proceeds and no lock file is needed |
+
+Slurm rather than the record, because `control.json` is published on serve and
+retracted only on a *clean* stop. A `scancel`, an OOM kill or a node failure
+leaves it behind, and a record-based guard would then refuse to start forever
+with no way for the user to clear it from the portal. When no sibling job is
+running, a leftover record is treated as stale and removed.
+
+What this gives up is two concurrent sessions with different data directories or
+different resource shapes. For an image browser that is a thin use case, and it
+buys away the whole class of shared-state problems above.
+
+Ports are still allocated per session, so several *users* can share a compute
+node. The access token is what keeps one user's data out of another's reach: the
+control port is open on the node's interfaces, and the sidecar and Flight ports —
+though loopback-only — are reachable by every other user logged in to the same
 node.
 
-Each session also gets its own copy of every directory biopb resolves at run
-time. biopb honours exactly three XDG base dirs (`biopb/_locations.py`), and all
-three are redirected into the staged job directory:
+`XDG_CACHE_HOME` is redirected to node-local disk, and the transcode cache with
+it. That one is an XDG name because its audience is matplotlib/numba/Qt rather
+than biopb; those caches otherwise land in NFS home and get written by every
+concurrent session on the cluster at once.
 
-| | holds | why per-session |
-|---|---|---|
-| `XDG_STATE_HOME` | logs, pid, credential, session registry, the control's discovery record | two sessions would otherwise overwrite each other's credential and fight over one log |
-| `XDG_CONFIG_HOME` | `biopb.json`, `mcp-config.json` | a stale `~/.config/biopb` — a legacy `biopb.toml`, say — can no longer change how a session behaves |
-| `XDG_DATA_HOME` | webapp / samples lookups | a user's leftover `~/.local/share/biopb/webapp` cannot shadow the bundle the site chose |
+Two paths stay explicit on the command line, and that is what keeps a user's home
+from changing how a session behaves: `--config` points at the staged
+`biopb.json` this app writes, so the launch form is the only thing that decides
+the data directory, and `--static-dir` points at the bundle the site chose. The
+install locations are resolved before anything else, so a site that ships biopb
+as a module — setting `BIOPB_DATA_HOME` itself — still gets its own bundle.
 
-`XDG_CACHE_HOME` is redirected too, to node-local disk. biopb does not read it;
-the scientific stack underneath does, and those caches otherwise land in NFS home
-and get written by every concurrent session on the cluster at once.
-
-The install locations are resolved *before* these take effect, so a site that
-ships biopb as a module — setting `XDG_DATA_HOME` itself — still gets its own
-bundle. What the overrides neutralize is biopb's implicit fallbacks; every path
-this app depends on is passed explicitly (`--config`, `--static-dir`).
-
-Two consequences worth knowing. Anything the UI writes through the admin pages
-(the MCP config) lands in the session directory and goes away with the session —
-it is not persistent user configuration. And the session ignores whatever biopb
-config the user keeps in their home; the data directory comes from the launch
-form and nowhere else.
+One consequence worth knowing: because state is no longer per-session, anything
+the UI writes through the admin pages (the MCP config) now persists in the user's
+home and outlives the session, and the control's log lands in
+`~/.local/state/biopb/logs` on NFS home. `biopb control run` hardcodes that path
+and exposes no flag for it; the argparse entry point `python -m biopb_control run`
+does take `--server-log`, so it is movable by launching through the module
+instead. Left as is for now — at `--log-level INFO` with one server per user the
+volume is small.
 
 ## Using the data from Python, Java or napari
 
