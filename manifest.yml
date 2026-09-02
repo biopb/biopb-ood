@@ -13,5 +13,6 @@ description: |
   without any staging or import step. Reads formats including OME-Zarr,
   OME-TIFF, CZI, ND2, LIF, NDTiff, DICOM and NIfTI directly from disk.
 
-  The browser UI is reached over an SSH tunnel — the session card gives you the
-  exact command to copy.
+  The browser UI is served through the portal itself: the session card has a
+  Connect button and there is no tunnel to run. Only the Arrow Flight data plane,
+  for SDK and napari clients, needs the SSH command the card shows.
