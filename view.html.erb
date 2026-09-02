@@ -47,6 +47,29 @@
       <td><code><%= host %></code></td>
     </tr>
     <tr>
+      <th>Access token</th>
+      <td>
+        <div class="input-group">
+          <input type="text" readonly class="form-control" id="<%= uid %>-token"
+                 style="font-family:monospace;font-size:12px"
+                 value="<%= biopb_token %>">
+          <span class="input-group-btn">
+            <button class="btn btn-default" type="button"
+                    onclick="biopbCopy('<%= uid %>-token', this)">
+              <i class="fa fa-clipboard"></i> Copy
+            </button>
+          </span>
+        </div>
+        <p class="help-block" style="margin-top:4px">
+          The Connect button already carries this, so you only need it for an SDK
+          or napari client. It stays the same when you relaunch, so a copy saved
+          in a script keeps working. It gates the data <em>and</em> the admin API
+          — treat it as a password, and rotate it by deleting
+          <code>~/.local/state/biopb-ood/token</code>.
+        </p>
+      </td>
+    </tr>
+    <tr>
       <th>Arrow Flight</th>
       <td>
         <code>grpc://127.0.0.1:<%= grpc_port %></code>
@@ -68,7 +91,7 @@
         </div>
         <p class="help-block" style="margin-top:4px">
           Then connect to <code>grpc://localhost:<%= grpc_port %></code> with the
-          token from the link above.
+          token above.
           <%- if jump.empty? -%>
           If <code><%= host %></code> is not reachable from your machine, hop
           through your login host by adding
