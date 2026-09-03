@@ -93,39 +93,44 @@ mandatory in biopb, which this app has already supplied.
 
 Neither mode is reachable from off campus; that is site policy, not this app.
 
-#### The certificate, and why it covers the whole cluster
+#### The certificate
 
-Flight TLS is trust-on-first-use: the certificate is self-signed, there is no CA,
-and the client pins the leaf itself (biopb/biopb#604). But gRPC still verifies the
-**dialed name** against the certificate's SANs, and a certificate minted the
-ordinary way names only the node that happened to mint it. Since the scheduler
-puts the job wherever it likes, that fails later, on a different node, as an
-unexplained handshake error.
+Flight TLS is trust-on-first-use: the certificate is self-signed, there is no
+CA, and the client either pins the leaf on first connect (biopb/biopb#604) or is
+given its fingerprint up front, which the session card shows. Either way the
+anchor is the presented certificate itself, byte for byte.
 
-So `template/before.sh.erb` mints it once with every node in the cluster in its
-SANs — `sinfo`/`scontrol` for the list, short and domain-qualified, plus the
-running node's own names unconditionally. Because biopb's state directory is NFS
-home, that is the same file on every node, so:
+That fact is what makes a single certificate, minted wherever it happens to be
+minted first, correct on every node. gRPC verifies the *dialed* name against the
+certificate's SANs, so it would seem to need every node's name listed — but
+whenever the anchor is the presented leaf, biopb's client substitutes a name the
+certificate *does* list before checking (`_resolve_hostname_override`, in
+`biopb.tensor._tls`). That is sound specifically because no other,
+validly-issued certificate can satisfy a pin demanding an exact match: hostname
+verification exists to catch a MITM presenting a *different* cert, and pinning
+the leaf has already ruled that out. Confirmed directly against a live server:
+a certificate minted on one node, dialed from another by name, connects with no
+manual override, in both TOFU and fingerprint-pinned mode.
 
-- clients pin **one** fingerprint and it keeps working across relaunches, wherever
-  the job lands;
-- the certificate is minted on the first remote launch and never again.
+So `template/before.sh.erb` mints the certificate with biopb's own default (this
+host's names) on whichever node first runs a remote-Flight session, and never
+touches it again. Because biopb's state directory is NFS home, that is the same
+file — and the same fingerprint — on every node afterward, for every relaunch.
 
-It is **never rotated automatically.** `cert init --force` invalidates pins that
-clients already hold, and doing that silently at launch is precisely the surprise
-this app exists to avoid. A certificate that does not cover the running node is
-reported in the job output with the command to fix it, and the session still
-starts. Expiry is enforced even under a pin (biopb/biopb#913), so a lapsed
-certificate does need re-minting — and every client then re-pins.
+**Never rotated automatically.** `cert init --force` invalidates pins that
+clients already hold, and doing that silently at launch is precisely the
+surprise this app exists to avoid. Expiry is still enforced under a pin
+(biopb/biopb#913), so a lapsed certificate does need re-minting by hand — and
+every client then re-pins.
 
 The private key is per-user and readable only by you. It must stay that way: the
 leaf *is* the trust anchor, so a shared key would let one user impersonate
 another's data plane.
 
-The session card shows the fingerprint, over the portal's authenticated HTTPS.
-That is the out-of-band channel that makes the first connection actually
-trustworthy rather than merely convenient — pass it as `tls_fingerprint` and the
-connection is verified rather than blindly pinned.
+The one client mode this does not cover is an explicit `ca_pem` — there, a
+*different* validly-issued certificate really could exist, so the SAN check
+stays load-bearing and the substitution above does not apply. This app never
+asks anyone to use that mode: it recommends the fingerprint, or plain TOFU.
 
 If the `tls` extra is missing, no certificate can be minted; the launcher says so
 and falls back to loopback for that session rather than failing the launch. The

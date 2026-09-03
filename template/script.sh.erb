@@ -93,8 +93,9 @@ fi
 # --- how far the Flight plane reaches --------------------------------------- #
 #
 # Set by the "Arrow Flight access" form field and resolved in before.sh.erb,
-# which also makes sure a cluster-wide certificate exists (and downgrades to
-# loopback if it could not). Two knobs move together, and they must agree:
+# which also makes sure a certificate exists (and downgrades to loopback if it
+# could not; see before.sh.erb for why one certificate, minted once, works from
+# every node). Two knobs move together, and they must agree:
 # biopb defaults TLS to ON for a public --grpc-bind and off for loopback, so
 # passing them as a pair keeps the exposure and its protection from drifting
 # apart in a later edit.

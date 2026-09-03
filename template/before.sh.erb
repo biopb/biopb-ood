@@ -203,23 +203,30 @@ export biopb_token
 #
 # Remote Flight (form: "Arrow Flight access") publishes the gRPC port on the
 # node's interfaces, and biopb turns TLS on by default as soon as that bind is
-# public. Trust is the client pinning the leaf itself -- there is no CA, and no
-# name to fall back on (TOFU, biopb/biopb#604) -- but gRPC still verifies the
-# DIALED NAME against the cert's SANs, so the cert has to name every node the
-# scheduler might land this job on. A cert minted the ordinary way names only
-# the node that happened to mint it, which is a failure the user meets much
-# later, on some other node, as an unexplained handshake error.
+# public. There is no CA: the client pins the leaf itself on first connect
+# (TOFU, biopb/biopb#604), or is given its fingerprint up front (what the
+# session card recommends) -- either way the anchor IS the presented
+# certificate, byte for byte.
 #
-# Minting it once with the whole partition in its SANs is what makes it correct
-# everywhere and permanently: biopb's state dir is NFS home, so this is the same
-# file on every node, and clients pin one fingerprint that survives relaunches
-# wherever the job lands. It is the cross-node stability that one-server-per-user
-# bought (see the header of this file) spent on the thing that needed it most.
+# That fact is what makes minting unremarkable: gRPC verifies the DIALED name
+# against the cert's SANs, so a naive reading says the cert must name every node
+# the scheduler might land this job on. It does not. Whenever the anchor is the
+# presented leaf, biopb's client substitutes a name the cert DOES list before
+# checking (`_resolve_hostname_override`) -- safe specifically because no other,
+# validly-issued certificate can satisfy a pin that demands an exact byte match.
+# Measured directly: a cert minted on one node, served from another, connects
+# with neither a manual override nor any special client config, in both TOFU and
+# fingerprint-pinned mode. So the cert is minted once, wherever that first
+# happens to be, using biopb's own default (this host's names) -- and biopb's
+# state dir being NFS home is what makes "once" mean once for the account, not
+# once per node.
+#
+# (The one client-supplied mode this does NOT cover is an explicit `ca_pem` --
+# there, a *different* validly-issued cert could exist, so the SAN check stays
+# load-bearing. This app never asks anyone to use that mode.)
 #
 # NEVER rotated here. --force invalidates pins clients already hold, and doing
-# that silently at launch is the surprise this app exists to avoid. A cert that
-# does not cover this node is reported with the command to fix it, and the
-# session still starts -- the browser UI does not depend on any of this.
+# that silently at launch is the surprise this app exists to avoid.
 export flight_remote="<%= context.flight_remote %>"
 flight_fingerprint=""
 
@@ -230,31 +237,10 @@ if [[ "${flight_remote}" == "true" ]]; then
   export PATH="${BIOPB_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
   biopb_cert="${BIOPB_STATE}/tls/server-cert.pem"
 
-  # Every node in the cluster, short name and domain-qualified, because a client
-  # may dial either. sinfo reports a range expression ("mantis-[001-038,040]"),
-  # which only scontrol can expand.
-  biopb_sans=()
-  biopb_domain=""
-  case "${fqdn}" in *.*) biopb_domain="${fqdn#*.}" ;; esac
-  while read -r n; do
-    [[ -n "${n}" ]] || continue
-    biopb_sans+=(--san "${n}")
-    [[ -n "${biopb_domain}" ]] && biopb_sans+=(--san "${n}.${biopb_domain}")
-  done < <(scontrol show hostnames \
-             "$(sinfo -h -o '%N' 2>/dev/null | paste -sd, -)" 2>/dev/null \
-           | sort -u || true)
-
-  # This node's own names go in unconditionally, not just as a fallback. Slurm
-  # lists compute nodes, and a job could be running somewhere sinfo does not
-  # report; without this, the session that MINTS the cert could end up unable to
-  # use it, which reads as a bug in the certificate rather than in the node list.
-  # It also means the check below can only ever fire for a pre-existing cert.
-  biopb_sans+=(--san "${host}" --san "${host%%.*}")
-
   if [[ ! -f "${biopb_cert}" ]]; then
-    if biopb-tensor-server cert init "${biopb_sans[@]}" >/dev/null 2>&1; then
-      echo "Note: minted a TLS certificate for Arrow Flight, covering every node" >&2
-      echo "      in this cluster. It is reused by every future session." >&2
+    if biopb-tensor-server cert init >/dev/null 2>&1; then
+      echo "Note: minted a TLS certificate for Arrow Flight. It is reused by" >&2
+      echo "      every future session, on any node." >&2
     else
       # Most likely the 'tls' extra is missing, in which case --tls would abort
       # the launch outright. Downgrade to the tunnel instead: the session still
@@ -269,19 +255,6 @@ if [[ "${flight_remote}" == "true" ]]; then
 
   if [[ "${flight_remote}" == "true" && -r "${biopb_cert}" ]] \
      && command -v openssl >/dev/null 2>&1; then
-    biopb_cert_sans="$(openssl x509 -in "${biopb_cert}" -noout -ext subjectAltName 2>/dev/null || true)"
-    if [[ -n "${biopb_cert_sans}" ]] \
-       && ! grep -qE "DNS:${host%%.*}([,[:space:]]|$)" <<<"${biopb_cert_sans}"; then
-      echo "Warning: your TLS certificate does not list ${host%%.*} among its" >&2
-      echo "         names, so SDK clients will reject this node's Flight port even" >&2
-      echo "         though the pin is right. It predates this app's cluster-wide" >&2
-      echo "         certificate. Widen it (this rotates the cert, so every client" >&2
-      echo "         must clear its pin in ~/.local/state/biopb/tls-known-hosts.json):" >&2
-      echo "           rm ${BIOPB_STATE}/tls/server-cert.pem ${BIOPB_STATE}/tls/server-key.pem" >&2
-      echo "         and relaunch -- this app mints the replacement cluster-wide," >&2
-      echo "         so it is the last time you have to do this. The web UI is" >&2
-      echo "         unaffected either way." >&2
-    fi
     flight_fingerprint="$(openssl x509 -in "${biopb_cert}" -noout -fingerprint -sha256 2>/dev/null \
                           | sed 's/^.*=//' || true)"
   fi
