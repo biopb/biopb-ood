@@ -62,14 +62,75 @@ the site does not already carry. A site that cannot make that assumption should
 run the [`tunnel`](../../tree/tunnel) branch instead: it keeps every listener on
 loopback and moves the whole session over SSH.
 
-The sidecar and the Arrow Flight plane are unaffected: they stay on `127.0.0.1`.
-Flight is therefore still tunnel-only, which is what the session card shows for
-SDK and napari users.
+The sidecar is unaffected: it stays on `127.0.0.1` always. The Arrow Flight
+plane is a separate decision, described next — and unlike the control, it *can*
+be protected, so the two planes do not have the same exposure.
 
 One further consequence of the public bind: biopb gates the **session console**
 on the control's own bind address, so it is *off* in these sessions —
 `session console disabled: control bound to 0.0.0.0 (not loopback)` in the job
 output. The tunnel branch, whose control stays on loopback, keeps it.
+
+### Remote Arrow Flight
+
+The **Arrow Flight access** form field decides whether the gRPC data plane is
+reachable from your own machine. It defaults to remote. This is the plane the
+Python/Java SDK and napari use; the web UI is proxied by the portal either way
+and is unaffected by the choice.
+
+| | Remote (default) | Loopback only |
+|---|---|---|
+| `--grpc-bind` | `0.0.0.0` | `127.0.0.1` |
+| TLS | `--tls` | `--no-tls` |
+| Client dials | `grpcs://<node>:<port>` directly | `grpc://localhost:<port>` through `ssh -L` |
+| Token on the wire | inside TLS | inside the SSH tunnel |
+
+The pairing is deliberate and the two flags are set together in
+`template/script.sh.erb`: biopb defaults TLS *on* for a public `--grpc-bind` and
+off for loopback, so passing them as a pair keeps the exposure and its protection
+from drifting apart in a later edit. A public bind also makes the access token
+mandatory in biopb, which this app has already supplied.
+
+Neither mode is reachable from off campus; that is site policy, not this app.
+
+#### The certificate, and why it covers the whole cluster
+
+Flight TLS is trust-on-first-use: the certificate is self-signed, there is no CA,
+and the client pins the leaf itself (biopb/biopb#604). But gRPC still verifies the
+**dialed name** against the certificate's SANs, and a certificate minted the
+ordinary way names only the node that happened to mint it. Since the scheduler
+puts the job wherever it likes, that fails later, on a different node, as an
+unexplained handshake error.
+
+So `template/before.sh.erb` mints it once with every node in the cluster in its
+SANs — `sinfo`/`scontrol` for the list, short and domain-qualified, plus the
+running node's own names unconditionally. Because biopb's state directory is NFS
+home, that is the same file on every node, so:
+
+- clients pin **one** fingerprint and it keeps working across relaunches, wherever
+  the job lands;
+- the certificate is minted on the first remote launch and never again.
+
+It is **never rotated automatically.** `cert init --force` invalidates pins that
+clients already hold, and doing that silently at launch is precisely the surprise
+this app exists to avoid. A certificate that does not cover the running node is
+reported in the job output with the command to fix it, and the session still
+starts. Expiry is enforced even under a pin (biopb/biopb#913), so a lapsed
+certificate does need re-minting — and every client then re-pins.
+
+The private key is per-user and readable only by you. It must stay that way: the
+leaf *is* the trust anchor, so a shared key would let one user impersonate
+another's data plane.
+
+The session card shows the fingerprint, over the portal's authenticated HTTPS.
+That is the out-of-band channel that makes the first connection actually
+trustworthy rather than merely convenient — pass it as `tls_fingerprint` and the
+connection is verified rather than blindly pinned.
+
+If the `tls` extra is missing, no certificate can be minted; the launcher says so
+and falls back to loopback for that session rather than failing the launch. The
+fallback is in the safe direction, and the card follows what actually happened
+rather than what the form asked.
 
 ## Requirements
 
@@ -105,7 +166,7 @@ normally.
 | `submit.yml.erb` | Slurm resources + which vars reach `view.html.erb` |
 | `template/before.sh.erb` | allocates ports + access token on the compute node |
 | `template/script.sh.erb` | writes the session config and runs `biopb control run` |
-| `view.html.erb` | the session card: Connect button + the Flight tunnel |
+| `view.html.erb` | the session card: Connect button, token, Flight endpoint or tunnel |
 
 `template/` is the part OnDemand stages into the job directory. Scripts placed
 outside it are never staged — that was one of the reasons the earlier version of
@@ -149,8 +210,9 @@ Four values are site-dependent. The first two can actually break the app.
   that wants a menu can swap it for a `select` in `form.yml.erb`.
 - **Login host** — read from your cluster's own OnDemand config (`v2.login.host`
   in `/etc/ood/config/clusters.d/<id>.yml`), so there is nothing site-specific to
-  edit. It only affects the Arrow Flight tunnel command on the card, and stays
-  editable per session. If the lookup finds nothing the field is blank and the
+  edit. It only affects the Arrow Flight tunnel command on the card, and only
+  when **Arrow Flight access** is set to loopback; remote Flight is dialed
+  directly and needs no jump host. It stays editable per session. If the lookup finds nothing the field is blank and the
   card shows a direct `ssh` to the compute node instead of a broken `-J`.
   Multi-cluster sites: `form.yml.erb` renders once, so the default takes the first
   job-allowed cluster and cannot follow the cluster menu; drive it from
@@ -299,14 +361,33 @@ volume is small.
 
 ## Using the data from Python, Java or napari
 
-Arrow Flight is not published through the portal, so it needs the tunnel the
-session card shows:
+Arrow Flight is never published through the portal — the OnDemand proxy is HTTP
+and cannot carry gRPC. With the default **remote** setting it is published on the
+compute node instead, and the card gives you the endpoint and the certificate
+fingerprint:
 
 ```python
 from biopb.tensor import TensorFlightClient
-client = TensorFlightClient("grpc://localhost:<grpc_port>", token="<token>")
+client = TensorFlightClient(
+    "grpcs://<node>:<grpc_port>",
+    token="<token>",
+    tls_fingerprint="<fingerprint from the session card>",   # optional; verifies the first connect
+)
 arr = client.get_tensor("<source_id>/<field>")   # lazy dask array
 ```
+
+Omit `tls_fingerprint` and the client pins on first use instead, storing it in
+`~/.local/state/biopb/tls-known-hosts.json` keyed by `host:port`. Since the port
+changes every launch, each session is a fresh first-connect — which is the reason
+to check the fingerprint rather than let it pin silently.
+
+Do not pass `tls_ca_pem` as well. `resolve_tls_trust` short-circuits on it
+(`if ca_pem: resolved = ca_pem`) and never consults the fingerprint, so a wrong
+fingerprint is accepted silently — the two arguments are alternative trust modes,
+not layers.
+
+With **loopback only**, run the `ssh -L` command from the card and dial
+`grpc://localhost:<grpc_port>` with no TLS argument.
 
 ## Troubleshooting
 

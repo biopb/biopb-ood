@@ -14,6 +14,12 @@ batch_connect:
     - sidecar_port
     - grpc_port
     - ood_user
+    # Whether the Flight plane was published, and the fingerprint a client should
+    # expect if so. The card renders a grpcs:// endpoint or an ssh -L command
+    # from these — before.sh.erb may downgrade the form's answer (no 'tls'
+    # extra), so the card follows what actually happened, not what was asked.
+    - flight_remote
+    - flight_fingerprint
     # The portal path this session is published at. Derived in before.sh and
     # passed to both the launcher (--url-prefix) and the card (the link target),
     # so the address biopb was told and the address the button opens cannot drift.

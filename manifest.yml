@@ -14,5 +14,7 @@ description: |
   OME-TIFF, CZI, ND2, LIF, NDTiff, DICOM and NIfTI directly from disk.
 
   The browser UI is served through the portal itself: the session card has a
-  Connect button and there is no tunnel to run. Only the Arrow Flight data plane,
-  for SDK and napari clients, needs the SSH command the card shows.
+  Connect button and there is no tunnel to run. The Arrow Flight data plane, for
+  SDK and napari clients, is published on the compute node over TLS by default —
+  the card gives you the endpoint and the certificate fingerprint. A launch-form
+  field keeps it on loopback behind an SSH tunnel instead.

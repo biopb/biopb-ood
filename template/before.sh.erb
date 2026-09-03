@@ -88,8 +88,9 @@ fi
 #
 # The control plane is published through OnDemand's own proxy, so it binds the
 # node's interfaces rather than loopback (see template/script.sh.erb). The
-# sidecar and the Flight plane stay on 127.0.0.1 — nothing outside the node
-# talks to them directly.
+# sidecar always stays on 127.0.0.1 — nothing outside the node talks to it. The
+# Flight plane follows the "Arrow Flight access" form field: published with TLS,
+# or loopback-only behind an ssh -L, decided further down this file.
 
 # --- what the portal will call this node ------------------------------------ #
 # OnDemand sets `host=$(hostname)` just before sourcing this file — the node's
@@ -197,6 +198,95 @@ if [[ -z "${biopb_token}" ]]; then
   mv -f "${tmp}" "${BIOPB_TOKEN_FILE}"
 fi
 export biopb_token
+
+# --- TLS for the Flight plane ----------------------------------------------- #
+#
+# Remote Flight (form: "Arrow Flight access") publishes the gRPC port on the
+# node's interfaces, and biopb turns TLS on by default as soon as that bind is
+# public. Trust is the client pinning the leaf itself -- there is no CA, and no
+# name to fall back on (TOFU, biopb/biopb#604) -- but gRPC still verifies the
+# DIALED NAME against the cert's SANs, so the cert has to name every node the
+# scheduler might land this job on. A cert minted the ordinary way names only
+# the node that happened to mint it, which is a failure the user meets much
+# later, on some other node, as an unexplained handshake error.
+#
+# Minting it once with the whole partition in its SANs is what makes it correct
+# everywhere and permanently: biopb's state dir is NFS home, so this is the same
+# file on every node, and clients pin one fingerprint that survives relaunches
+# wherever the job lands. It is the cross-node stability that one-server-per-user
+# bought (see the header of this file) spent on the thing that needed it most.
+#
+# NEVER rotated here. --force invalidates pins clients already hold, and doing
+# that silently at launch is the surprise this app exists to avoid. A cert that
+# does not cover this node is reported with the command to fix it, and the
+# session still starts -- the browser UI does not depend on any of this.
+export flight_remote="<%= context.flight_remote %>"
+flight_fingerprint=""
+
+if [[ "${flight_remote}" == "true" ]]; then
+  # Same resolution as template/script.sh.erb, repeated rather than shared: this
+  # file is sourced before that one runs, and connection.yml -- which carries the
+  # fingerprint to the session card -- is written in between.
+  export PATH="${BIOPB_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
+  biopb_cert="${BIOPB_STATE}/tls/server-cert.pem"
+
+  # Every node in the cluster, short name and domain-qualified, because a client
+  # may dial either. sinfo reports a range expression ("mantis-[001-038,040]"),
+  # which only scontrol can expand.
+  biopb_sans=()
+  biopb_domain=""
+  case "${fqdn}" in *.*) biopb_domain="${fqdn#*.}" ;; esac
+  while read -r n; do
+    [[ -n "${n}" ]] || continue
+    biopb_sans+=(--san "${n}")
+    [[ -n "${biopb_domain}" ]] && biopb_sans+=(--san "${n}.${biopb_domain}")
+  done < <(scontrol show hostnames \
+             "$(sinfo -h -o '%N' 2>/dev/null | paste -sd, -)" 2>/dev/null \
+           | sort -u || true)
+
+  # This node's own names go in unconditionally, not just as a fallback. Slurm
+  # lists compute nodes, and a job could be running somewhere sinfo does not
+  # report; without this, the session that MINTS the cert could end up unable to
+  # use it, which reads as a bug in the certificate rather than in the node list.
+  # It also means the check below can only ever fire for a pre-existing cert.
+  biopb_sans+=(--san "${host}" --san "${host%%.*}")
+
+  if [[ ! -f "${biopb_cert}" ]]; then
+    if biopb-tensor-server cert init "${biopb_sans[@]}" >/dev/null 2>&1; then
+      echo "Note: minted a TLS certificate for Arrow Flight, covering every node" >&2
+      echo "      in this cluster. It is reused by every future session." >&2
+    else
+      # Most likely the 'tls' extra is missing, in which case --tls would abort
+      # the launch outright. Downgrade to the tunnel instead: the session still
+      # works, and the failure is in the safe direction -- less exposed, not more.
+      echo "Warning: could not mint a TLS certificate, so Arrow Flight stays on" >&2
+      echo "         loopback for this session and the card will show an ssh -L" >&2
+      echo "         command. Install the 'tls' extra to enable remote Flight:" >&2
+      echo "           uv tool install --force 'biopb[web,tls]'" >&2
+      export flight_remote="false"
+    fi
+  fi
+
+  if [[ "${flight_remote}" == "true" && -r "${biopb_cert}" ]] \
+     && command -v openssl >/dev/null 2>&1; then
+    biopb_cert_sans="$(openssl x509 -in "${biopb_cert}" -noout -ext subjectAltName 2>/dev/null || true)"
+    if [[ -n "${biopb_cert_sans}" ]] \
+       && ! grep -qE "DNS:${host%%.*}([,[:space:]]|$)" <<<"${biopb_cert_sans}"; then
+      echo "Warning: your TLS certificate does not list ${host%%.*} among its" >&2
+      echo "         names, so SDK clients will reject this node's Flight port even" >&2
+      echo "         though the pin is right. It predates this app's cluster-wide" >&2
+      echo "         certificate. Widen it (this rotates the cert, so every client" >&2
+      echo "         must clear its pin in ~/.local/state/biopb/tls-known-hosts.json):" >&2
+      echo "           rm ${BIOPB_STATE}/tls/server-cert.pem ${BIOPB_STATE}/tls/server-key.pem" >&2
+      echo "         and relaunch -- this app mints the replacement cluster-wide," >&2
+      echo "         so it is the last time you have to do this. The web UI is" >&2
+      echo "         unaffected either way." >&2
+    fi
+    flight_fingerprint="$(openssl x509 -in "${biopb_cert}" -noout -fingerprint -sha256 2>/dev/null \
+                          | sed 's/^.*=//' || true)"
+  fi
+fi
+export flight_fingerprint
 
 # Copied into connection.yml for the session card (see submit.yml.erb). The
 # username is resolved here rather than in the view, so the card does not depend

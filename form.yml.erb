@@ -135,6 +135,30 @@ attributes:
       you would rather wait once than have the catalog shift under you, or when
       the folder is on a filesystem you would rather not have polled.
 
+  flight_remote:
+    label: "Arrow Flight access"
+    widget: "select"
+    value: "true"
+    options:
+      - ["Remote — connect over grpcs:// from your own machine (recommended)", "true"]
+      - ["Loopback only — reach it through an SSH tunnel", "false"]
+    help: |
+      Where the Arrow Flight data plane listens. This is the gRPC port the
+      Python/Java SDK and napari use; it does not affect the web UI, which the
+      portal proxies either way.
+
+      Remote: Flight binds the node's interfaces and biopb turns TLS on, so a
+      client dials `grpcs://<node>:<port>` directly — no tunnel, and no
+      long-running ssh to babysit. Trust is a certificate your account owns and
+      no one else can read the key of; the session card shows its fingerprint to
+      check on first connect. The access token is required and crosses the
+      cluster network inside TLS.
+
+      Loopback only: Flight stays on 127.0.0.1 with no TLS, exactly as before,
+      and the card gives you the `ssh -L` command instead. Pick it if your
+      network blocks direct connections to compute nodes, or if you would rather
+      nothing but the portal be reachable.
+
   qos:
     label: "QOS"
     value: "general"
@@ -155,8 +179,10 @@ attributes:
       configuration; correct it if your site uses a different name from off-site.
 
       Used for one thing only: the Arrow Flight tunnel command on the session
-      card, for the Python/Java SDK and napari. The web UI does not need it — the
-      portal proxies that. Leave it blank if you reach compute nodes directly.
+      card, and only when *Arrow Flight access* above is set to loopback. The web
+      UI never needs it — the portal proxies that — and neither does remote
+      Flight, which is dialed directly. Leave it blank if you reach compute nodes
+      without a jump host.
 
 form:
   - cluster
@@ -166,5 +192,6 @@ form:
   - memory_gb
   - cache_gb
   - monitor_sources
+  - flight_remote
   - qos
   - login_host

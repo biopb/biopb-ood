@@ -230,7 +230,8 @@ copying a snippet.
 | Data directory default | `form.yml.erb`, `biopb_data_dir` in the ERB preamble | `~/data` when the user has one, else their home. Point it at your site's convention (a group share, `/scratch/$USER`) — home is the safe answer, not a good one, since the scan then walks everything under it |
 | QOS | form field, default `general` | change the default, or clear it to submit with no `--qos` |
 | Cluster | derived from `OodAppkit.clusters` | no edit needed |
-| Login host | derived from the cluster's `v2.login.host` | no edit needed; used only for the Arrow Flight tunnel |
+| Login host | derived from the cluster's `v2.login.host` | no edit needed; used only for the Arrow Flight tunnel, and only when the launch form asks for loopback Flight |
+| Arrow Flight access | form field, default remote (`grpcs://` on the node) | flip the default to `"false"` in `form.yml.erb` if your site firewalls compute nodes off from user workstations, or does not want the port published at all. See [Remote Arrow Flight](README.md#remote-arrow-flight) |
 | Cache size | form field, default 64 GB | **per session**, on node-local disk. A few concurrent sessions per node will find your real limit; lower it if `/tmp` is small |
 
 ### 6. Isolation you get for free

@@ -90,13 +90,36 @@ if [[ ! -f "${WEBAPP_DIR}/index.html" ]]; then
   exit 1
 fi
 
+# --- how far the Flight plane reaches --------------------------------------- #
+#
+# Set by the "Arrow Flight access" form field and resolved in before.sh.erb,
+# which also makes sure a cluster-wide certificate exists (and downgrades to
+# loopback if it could not). Two knobs move together, and they must agree:
+# biopb defaults TLS to ON for a public --grpc-bind and off for loopback, so
+# passing them as a pair keeps the exposure and its protection from drifting
+# apart in a later edit.
+#
+# The token is what actually gates the port in both cases. On a public bind
+# biopb REQUIRES one, which this app has already supplied via
+# BIOPB_TENSOR_TOKEN; TLS is what stops it crossing the cluster network in the
+# clear, which is exactly what --no-tls on a public bind would do.
+if [[ "${flight_remote:-false}" == "true" ]]; then
+  grpc_bind="0.0.0.0"
+  tls_flag="--tls"
+  flight_desc="${host}:${grpc_port}  (grpcs://, TLS)"
+else
+  grpc_bind="127.0.0.1"
+  tls_flag="--no-tls"
+  flight_desc="127.0.0.1:${grpc_port}  (loopback; reach it with ssh -L)"
+fi
+
 # `server.port` is how the released control tells its data-plane child which
 # Flight port to bind; newer builds pass it explicitly and ignore this. Setting
 # it is correct either way.
 cat > "${CONFIG_FILE}" <<JSON
 {
   "server": {
-    "host": "127.0.0.1",
+    "host": "${grpc_bind}",
     "port": ${grpc_port},
     "aggressive_dir_pruning": true
   },
@@ -119,7 +142,7 @@ echo "  data directory : <%= context.user_data_dir %>"
 echo "  control (UI)   : 0.0.0.0:${control_port}  (portal proxy target)"
 echo "  published at   : ${url_prefix}/"
 echo "  HTTP sidecar   : 127.0.0.1:${sidecar_port}"
-echo "  Arrow Flight   : 127.0.0.1:${grpc_port}"
+echo "  Arrow Flight   : ${flight_desc}"
 
 # This branch serves the UI through OnDemand's proxy, which requires a biopb
 # carrying --url-prefix (biopb/biopb#731). Without it the control emits a shell
@@ -139,12 +162,15 @@ fi
 # node over the network, so the control cannot stay on loopback the way biopb's
 # default assumes. BIOPB_CONTROL_HOST is biopb's documented escape hatch for the
 # control bind (`_control_bind_endpoint`: "env still wins"). The access token
-# gates it; the sidecar and the Flight plane are unaffected and stay on 127.0.0.1.
+# gates it; the sidecar is unaffected and stays on 127.0.0.1, and the Flight
+# plane binds wherever the form asked (see above).
 #
 # The cost, stated plainly: portal -> compute node is plain HTTP, so the token
 # crosses the cluster network in the clear (biopb/biopb#614 — the control has no
 # TLS). Browser -> portal is HTTPS. This is the same posture as every OnDemand
-# Jupyter app, and it is the reason the `tunnel` branch still exists.
+# Jupyter app, and it is the reason the `tunnel` branch still exists. Note this
+# is the CONTROL plane only: remote Flight above carries the same token, but
+# inside TLS, so the two planes do not have the same exposure.
 export BIOPB_CONTROL_HOST=0.0.0.0
 export BIOPB_TENSOR_TOKEN="${biopb_token}"
 
@@ -152,8 +178,8 @@ biopb control run \
   --config "${CONFIG_FILE}" \
   --static-dir "${WEBAPP_DIR}" \
   --base-port "${base_port}" \
-  --grpc-bind 127.0.0.1 \
-  --no-tls \
+  --grpc-bind "${grpc_bind}" \
+  "${tls_flag}" \
   --url-prefix "${url_prefix}" \
   --log-level INFO &
 CONTROL_PID=$!
