@@ -228,6 +228,17 @@ export biopb_token
 # NEVER rotated here. --force invalidates pins clients already hold, and doing
 # that silently at launch is the surprise this app exists to avoid.
 export flight_remote="<%= context.flight_remote %>"
+# Explicit, opt-in only -- rotation is a full cutover (new key, new leaf, every
+# existing client pin invalidated), never something to trigger silently. See
+# the "Rotate Arrow Flight certificate" field's help text.
+rotate_flight_cert="<%= context.rotate_flight_cert %>"
+# There is no in-place renewal in biopb: `cert init` either reuses the file
+# as-is or (`--force`) mints a brand-new keypair + leaf -- core/tls.py has no
+# third option that just extends the existing one's dates. So an expiring cert
+# has to be caught here, while there is still time to rotate deliberately,
+# rather than surfacing later as the cascading, hard-to-diagnose Flight
+# failure described in biopb-ood#1.
+FLIGHT_CERT_WARN_DAYS=30
 flight_fingerprint=""
 
 if [[ "${flight_remote}" == "true" ]]; then
@@ -237,10 +248,21 @@ if [[ "${flight_remote}" == "true" ]]; then
   export PATH="${BIOPB_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
   biopb_cert="${BIOPB_STATE}/tls/server-cert.pem"
 
-  if [[ ! -f "${biopb_cert}" ]]; then
-    if biopb-tensor-server cert init >/dev/null 2>&1; then
-      echo "Note: minted a TLS certificate for Arrow Flight. It is reused by" >&2
-      echo "      every future session, on any node." >&2
+  if [[ "${rotate_flight_cert}" == "true" || ! -f "${biopb_cert}" ]]; then
+    force_flag=()
+    [[ "${rotate_flight_cert}" == "true" ]] && force_flag=(--force)
+    if biopb-tensor-server cert init "${force_flag[@]}" >/dev/null 2>&1; then
+      if [[ "${rotate_flight_cert}" == "true" ]]; then
+        echo "Note: rotated the Arrow Flight TLS certificate, by request. There" >&2
+        echo "      is no in-place renewal -- this is a brand-new key and leaf," >&2
+        echo "      shared by every future session on every node. Any script or" >&2
+        echo "      napari profile with a saved tls_fingerprint must be updated" >&2
+        echo "      from this session's card before it connects again; clients" >&2
+        echo "      relying on trust-on-first-use need no changes." >&2
+      else
+        echo "Note: minted a TLS certificate for Arrow Flight. It is reused by" >&2
+        echo "      every future session, on any node." >&2
+      fi
     else
       # Most likely the 'tls' extra is missing, in which case --tls would abort
       # the launch outright. Downgrade to the tunnel instead: the session still
@@ -249,6 +271,36 @@ if [[ "${flight_remote}" == "true" ]]; then
       echo "         loopback for this session and the card will show an ssh -L" >&2
       echo "         command. Install the 'tls' extra to enable remote Flight:" >&2
       echo "           uv tool install --force 'biopb[web,tls]'" >&2
+      export flight_remote="false"
+    fi
+  fi
+
+  if [[ "${flight_remote}" == "true" && -f "${biopb_cert}" ]] \
+     && command -v openssl >/dev/null 2>&1; then
+    if openssl x509 -in "${biopb_cert}" -noout -checkend 0 2>/dev/null; then
+      # Not expired. Warn only inside the notice window -- a mint/rotate just
+      # above always clears this comfortably, so this fires only for a cert
+      # that has been sitting untouched and is now approaching its deadline.
+      if ! openssl x509 -in "${biopb_cert}" -noout \
+             -checkend $((FLIGHT_CERT_WARN_DAYS * 86400)) 2>/dev/null; then
+        cert_deadline="$(openssl x509 -in "${biopb_cert}" -noout -enddate 2>/dev/null \
+                          | sed 's/^notAfter=//')"
+        echo "Warning: the Arrow Flight TLS certificate expires ${cert_deadline}" >&2
+        echo "         -- within ${FLIGHT_CERT_WARN_DAYS} days. Relaunch with" >&2
+        echo "         'Rotate Arrow Flight certificate' set to Yes before then;" >&2
+        echo "         there is no in-place renewal, only a full rotation." >&2
+      fi
+    else
+      # Already expired: remote Flight would only fail every handshake from
+      # here (TLS validity is enforced even under a TOFU/fingerprint pin), so
+      # fall back to loopback rather than publish a port nothing can connect
+      # to -- the same safe-direction failure as a missing 'tls' extra above.
+      cert_deadline="$(openssl x509 -in "${biopb_cert}" -noout -enddate 2>/dev/null \
+                        | sed 's/^notAfter=//')"
+      echo "Warning: the Arrow Flight TLS certificate expired ${cert_deadline}." >&2
+      echo "         Remote Flight cannot work until it is rotated -- relaunch" >&2
+      echo "         with 'Rotate Arrow Flight certificate' set to Yes. Falling" >&2
+      echo "         back to loopback for this session in the meantime." >&2
       export flight_remote="false"
     fi
   fi

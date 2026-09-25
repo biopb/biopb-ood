@@ -159,6 +159,27 @@ attributes:
       network blocks direct connections to compute nodes, or if you would rather
       nothing but the portal be reachable.
 
+  rotate_flight_cert:
+    label: "Rotate Arrow Flight certificate"
+    widget: "select"
+    value: "false"
+    options:
+      - ["No — keep the current certificate (recommended)", "false"]
+      - ["Yes — mint a new one now", "true"]
+    help: |
+      Only needed if a previous session warned that the certificate is
+      expiring. There is no renewal in biopb — every rotation mints a brand
+      new key and leaf, never extends the existing one — so this replaces the
+      certificate your whole account shares, on every node, immediately.
+
+      Any script or napari profile with a saved `tls_fingerprint` will stop
+      connecting until you copy the new value off this session's card and
+      update every place you saved the old one. Clients relying on
+      trust-on-first-use need no changes — they pin fresh on every session
+      already, since the Flight port changes each launch.
+
+      Only takes effect when *Arrow Flight access* above is Remote.
+
   qos:
     label: "QOS"
     value: "general"
@@ -193,5 +214,6 @@ form:
   - cache_gb
   - monitor_sources
   - flight_remote
+  - rotate_flight_cert
   - qos
   - login_host
