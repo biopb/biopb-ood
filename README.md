@@ -16,84 +16,37 @@ compute node (all listeners on 127.0.0.1)
   Arrow Flight    base+5   gRPC data plane — Python/Java SDK, napari
 ```
 
-Images are transcoded to Arrow on demand, at chunk granularity, into a
-multi-resolution pyramid — so whole-slide and larger-than-memory datasets open
-without any staging or import step, and files stay in their original format.
+**[INSTALL.md](INSTALL.md)** has the deployment steps. **[DESIGN-NOTES.md](DESIGN-NOTES.md)**
+has the rationale behind specific choices below, if you need it.
 
-## How the UI reaches your browser
+## Requirements
+
+- **biopb 0.13.0 or newer**, with a matching CLI and web bundle from the same
+  release.
+- **Open OnDemand**, with Slurm and a home directory the compute nodes can see.
+
+See [INSTALL.md](INSTALL.md) for single-user and site-wide setup — everything
+else (Slurm resources, cluster config, install layout) comes with those two.
+
+## Routing
 
 The web UI is served through OnDemand's own `/node/<host>/<port>/` proxy, so the
 session card is a **Connect** button and there is no tunnel to run.
 
-That route passes the full, untouched path to the backend and rewrites nothing in
-the response body, so the app has to know the sub-URI it is being served under —
-the same reason Jupyter apps are launched with `--ServerApp.base_url=…`. biopb
-learns it from `--url-prefix`, which `before.sh.erb` derives as
-`/node/$host/$port` and hands to both the launcher and the card. The control then
-strips the prefix off incoming requests and rewrites the SPA shell (a
-`<base href>`, the root-absolute asset URLs, and a `window.__BIOPB_BASE__` the
-app reads instead of a build-time constant) so everything resolves back inside
-the session's namespace.
+This needs **biopb 0.13.0 or newer**, which added `--url-prefix` support; the
+launcher refuses to start without it rather than serving a blank page. Against
+older installs, use this app's [`tunnel`](../../tree/tunnel) branch instead —
+same app, moved over SSH.
 
-This needs **biopb 0.13.0 or newer** (biopb/biopb#731 added `--url-prefix`).
-`script.sh.erb` checks for the flag and refuses to start without it, rather than
-letting the session come up as a blank page. Against 0.12.0 or earlier, use the
-[`tunnel`](../../tree/tunnel) branch instead — same app, moved over SSH.
+### Security model
 
-### What this costs, and why the tunnel branch still exists
-
-OnDemand's proxy runs on the portal's web node and connects to the compute node
-over the network, so the control plane binds `0.0.0.0` here instead of loopback.
-That is `BIOPB_CONTROL_HOST`, and it is the escape hatch biopb/biopb#618 left
-open on purpose: *"publishing the UI stays possible for someone fronting it with
-their own TLS proxy, but only as the deliberate, named act of passing a public
-`--control-host`."* OnDemand is that proxy — for the browser → portal leg.
-
-It is not one for the portal → compute-node leg. The control has no TLS support
-at all (its `uvicorn.Config` sets no `ssl_certfile`/`ssl_keyfile`; biopb's `--tls`
-reaches only the Flight plane), so **the access token that gates the data *and*
-admin API crosses the cluster network in the clear.** Note #614 is closed but did
-not fix this: #618 resolved it by taking the public bind away, not by adding TLS,
-which is exactly why publishing the UI is a deliberate act here.
-
-**This deployment accepts that**, because the portal's Jupyter app is configured
-the same way and the compute network is trusted — biopb introduces no exposure
-the site does not already carry. A site that cannot make that assumption should
-run the [`tunnel`](../../tree/tunnel) branch instead: it keeps every listener on
-loopback and moves the whole session over SSH.
-
-The sidecar and the Arrow Flight plane are unaffected: they stay on `127.0.0.1`.
-Flight is therefore still tunnel-only, which is what the session card shows for
-SDK and napari users.
-
-One further consequence of the public bind: biopb gates the **session console**
-on the control's own bind address, so it is *off* in these sessions —
-`session console disabled: control bound to 0.0.0.0 (not loopback)` in the job
-output. The tunnel branch, whose control stays on loopback, keeps it.
-
-## Requirements
-
-**[INSTALL.md](INSTALL.md) is the step-by-step guide**, single-user and
-site-wide taken separately. In short:
-
-- **biopb 0.13.0 or newer** — the release that carries `--url-prefix`
-  (biopb/biopb#731). `curl -sSfL https://biopb.org/install.sh | bash` is the
-  normal user install; the guide also covers a minimal wheel install for
-  headless nodes, a shared install for a site, and a source build for tracking
-  biopb's `dev` branch.
-- The CLI and the web bundle from the **same release** — a new CLI with an old
-  bundle starts cleanly and then serves a blank page.
-- The container image (`jiyuuchc/biopb-tensor-server`) cannot serve this UI. It
-  is a headless Flight-only data plane with no web front end.
-- Slurm, and a home directory the compute nodes can see.
-
-`script.sh.erb` checks for `--url-prefix` before launching and checks the served
-document for its `<base href>` afterwards, so either half being wrong is reported
-in the job output rather than guessed at.
-
-`BIOPB_BIN_DIR` and `BIOPB_WEBAPP_DIR` point the app at a build tree; unset, they
-default to the installer's locations under `~/.local` and the app behaves
-normally.
+The control plane binds the node's public interface (not loopback) so OnDemand's
+proxy can reach it, and it has no TLS of its own: the access token that gates
+the data and admin API crosses the portal → compute-node hop in the clear. This
+is the same posture as the portal's other batch-connect apps (e.g. Jupyter) and
+is accepted on that basis. A site that can't accept it should use the
+[`tunnel`](../../tree/tunnel) branch instead, which keeps every listener on
+loopback.
 
 ## Files
 
@@ -105,168 +58,110 @@ normally.
 | `submit.yml.erb` | Slurm resources + which vars reach `view.html.erb` |
 | `template/before.sh.erb` | allocates ports + access token on the compute node |
 | `template/script.sh.erb` | writes the session config and runs `biopb control run` |
-| `view.html.erb` | the session card: Connect button + the Flight tunnel |
+| `view.html.erb` | the session card: Connect button, token, Flight endpoint or tunnel |
 
 `template/` is the part OnDemand stages into the job directory. Scripts placed
-outside it are never staged — that was one of the reasons the earlier version of
-this app never launched.
+outside it are never staged.
 
-`template/script.sh.erb` must stay **executable** (`100755`). The renderer does
-`output_file.chmod(file.stat.mode)`, so the rendered `script.sh` inherits the
-`.erb`'s mode, and the job script *executes* it — while `before.sh` is only
-sourced, which is why that one can stay `0644`. Committing it 0644 gets you a
-job that writes `connection.yml`, hits `Permission denied` on the next line, and
-leaves a session card with nothing on it.
+`template/script.sh.erb` must stay **executable** (`100755`); `before.sh.erb`
+stays `0644` (sourced, not executed) — see [DESIGN-NOTES.md](DESIGN-NOTES.md)
+if you're wondering why that distinction matters.
 
-## Site-specific settings to check
+## Start-up seqeunce
 
-Four values are site-dependent. The first two can actually break the app.
+1. `before.sh.erb` refuses to start if you already have a session running (see
+   [Isolation](#isolation-and-multi-tenancy)), then allocates ports, an access
+   token, and the portal prefix.
+2. `script.sh.erb` runs `biopb control run` and waits for HTTP 200 on
+   `/data_plane/readyz` — meaning the data plane is genuinely serving, not
+   just that the sidecar answered — for up to 15 minutes.
+3. The session card shows a Connect button carrying the token.
 
-- **Node URI** — `before.sh.erb` builds the prefix as `/node/$host/$port`, which
-  is OnDemand's default `node_uri`. If your portal sets a different one in
-  `ood_portal.yml`, change it there — biopb is told this exact string, so a
-  mismatch makes every request 404 rather than fail visibly. Do **not** point it
-  at `/rnode/`: that route strips the prefix before the backend sees it, which is
-  the opposite of what `--url-prefix` expects.
-- **The node's name in that prefix** — `before.sh.erb` replaces OnDemand's
-  `host=$(hostname)` with the fully qualified name when the node reports one.
-  The portal matches `/node/<host>/<port>` against `host_regex` in
-  `ood_portal.yml`, and a site that qualifies that pattern with its domain
-  never matches a short name: Apache falls through to its document root and
-  answers a bare 404, with nothing in the job output to suggest the name was at
-  fault. A site whose `host_regex` wants the short name instead should drop the
-  `hostname -f` block.
-- **Cluster** — `form.yml.erb` builds the list from `OodAppkit.clusters`, so it
-  adapts to whatever is in `/etc/ood/config/clusters.d`. If you would rather pin
-  it, drop `cluster` from the `form:` list and add a top-level `cluster: "<id>"`.
-  Keep the file's `.erb` extension whatever you do: the dashboard renders the
-  form through ERB only when the name says `.erb`, and a plain `form.yml` makes
-  the app open as *"This app requires clusters that do not exist or you do not
-  have access to"* — the ERB tags reach the YAML parser verbatim.
-- **QOS** — a form field, defaulting to `general`. Blank submits with no `--qos`
-  at all, so a site that does not use QOS needs no edit. It is a free-text field
-  rather than a menu because the valid set is per-account, not per-site; a site
-  that wants a menu can swap it for a `select` in `form.yml.erb`.
-- **Login host** — read from your cluster's own OnDemand config (`v2.login.host`
-  in `/etc/ood/config/clusters.d/<id>.yml`), so there is nothing site-specific to
-  edit. It only affects the Arrow Flight tunnel command on the card, and stays
-  editable per session. If the lookup finds nothing the field is blank and the
-  card shows a direct `ssh` to the compute node instead of a broken `-J`.
-  Multi-cluster sites: `form.yml.erb` renders once, so the default takes the first
-  job-allowed cluster and cannot follow the cluster menu; drive it from
-  OnDemand's `data-set-*` option attributes if that matters.
+**Watch the data directory** (on by default) decides whether the session opens
+immediately with the catalog filling in behind it, or waits for a full scan of
+the data directory first:
 
-## How a session works
-
-1. `before.sh.erb` finds a base port whose `+3/+4/+5` offsets are all free,
-   generates a 32-character access token, and derives the portal prefix
-   `/node/$host/$port`.
-2. `script.sh.erb` writes a per-session `biopb.json`, points the transcode cache
-   at node-local `/tmp` (not NFS home — it is write-heavy, disposable, and the
-   file backend takes a cross-process lock), gives the session its own XDG tree
-   (below), and runs `biopb control run` with `--url-prefix` and a `0.0.0.0`
-   control bind.
-3. It waits for **HTTP 200 on `/data_plane/readyz`** (up to 15 minutes — see
-   below for what that 200 does and does not promise), then confirms the
-   document served at the prefix actually carries a `<base href>` — a CLI new
-   enough to accept the flag paired with an older web bundle would otherwise
-   come up blank.
-4. The session card shows a Connect button pointing at the prefix, carrying the
-   token as a query parameter.
-
-### About the readiness gate
-
-Gate on HTTP 200 from `/data_plane/readyz`, and nothing else:
-
-- **Not** the control's `data_plane.state == "serving"`. That comes from a TCP
-  probe of the *Flight* port, which comes up about two seconds before the HTTP
-  sidecar binds — gate on it and the UI still gets 502s.
-- Note the path: health probes (`/readyz`, `/livez`, `/healthz`) live at the
-  sidecar **root**; only data endpoints are under `/api/*`. `/data_plane/api/readyz`
-  is a 404 by design, not a bug.
-
-**0.13.0 changed what that 200 means**, and waiting for one is right either way.
-Before it, `/readyz` answered 200 unconditionally — including while its body said
-`"status":"degraded"`, `"source_count":0`, with no backend connection at all,
-because it only *peeked* for a Flight client instead of making one
-(biopb/biopb#755). The gate passed early: on 0.12.0 this app announced a ready
-session roughly four minutes before the UI could list a source, and the viewer
-sat on "Connecting to server…" in the meantime.
-
-0.13.0 makes `/readyz` connect, answer from that health alone, and return **503
-until Flight says `SERVING`** — so a 200 means a data plane that is genuinely
-there, rather than a sidecar that merely answered. Since 0.13.0 is this app's
-floor, that is the behaviour you get; the paragraph above is only here to explain
-what an older install did.
-
-`SERVING` is not a promise of a complete catalog. Under progressive discovery
-(biopb/biopb#212) the server reaches `SERVING` immediately and populates behind
-you, carrying freshness in `full_scan_in_progress` and
-`last_full_scan_finished_at`; *"a client needing a complete catalog waits on
-those fields, not on `SERVING`"*. Which behaviour you get is decided by this
-app's own form:
-
-| "Watch the data directory" | what the first 200 means |
+| | what the first 200 means |
 |---|---|
-| **Yes** (default) | `SERVING` as soon as the server binds, catalog filling in the background — the session opens in seconds and images appear as they are found |
-| No | the sources are static, so the launch path registers every one **before** it binds; nothing answers until the walk finishes, and the first 200 therefore does carry a complete catalog |
-
-The default is Yes because the alternative makes people wait for a whole tree
-before seeing anything, and because a partial catalog is perfectly servable —
-the UI lists what exists and grows. It costs filesystem polling, which is the
-reason to choose No on a large or slow shared filesystem.
-
-`script.sh.erb` allows 15 minutes and logs a line a minute with the last status.
-That budget exists for the No case, where the pre-bind walk is minutes on a
-large tree and nothing is listening throughout; on the default the gate
-normally clears in seconds. Timing out is not fatal — a very large tree can
-outlast the wait, and the session is usable the moment it finishes.
+| **Yes** (default) | the session opens in seconds; images appear as they're found |
+| No | nothing answers until the whole directory has been walked; the first 200 carries a complete catalog |
 
 A cold start on a small dataset is ~8 seconds either way.
 
 ## Isolation and multi-tenancy
 
-Ports are allocated per session, so several sessions can share a compute node.
-The access token is what keeps one session's data out of another's reach: the
-control port is open on the node's interfaces, and the sidecar and Flight ports
-— though loopback-only — are reachable by every other user logged in to the same
-node.
+One BioPB session per user, enforced against Slurm rather than a session-record
+file (so a `scancel` or crash can't wedge the guard open). biopb's own state
+(`~/.config/biopb`, `~/.local/state/biopb`, `~/.local/share/biopb`) is left
+where biopb puts it, not redirected per session, since it's a singleton by
+construction — this is also what keeps the access token and TLS certificate
+stable across relaunches and nodes.
 
-Each session also gets its own copy of every directory biopb resolves at run
-time. biopb honours exactly three XDG base dirs (`biopb/_locations.py`), and all
-three are redirected into the staged job directory:
+Several *users* can still share a compute node: ports are per-session, and the
+access token is what keeps one user's data out of another's reach on the ports
+every user on the node can otherwise reach (the control port, plus the
+sidecar and Flight ports even though those are loopback-bound).
 
-| | holds | why per-session |
+The token persists across relaunches in `~/.local/state/biopb-ood/token`
+(mode `600`); rotate it by deleting that file.
+
+## Remote Arrow Flight
+
+The **Arrow Flight access** form field controls whether the gRPC data plane
+(the Python/Java SDK, napari) is reachable from your own machine. Defaults to
+remote; the web UI is unaffected either way.
+
+| | Remote (default) | Loopback only |
 |---|---|---|
-| `XDG_STATE_HOME` | logs, pid, credential, session registry, the control's discovery record | two sessions would otherwise overwrite each other's credential and fight over one log |
-| `XDG_CONFIG_HOME` | `biopb.json`, `mcp-config.json` | a stale `~/.config/biopb` — a legacy `biopb.toml`, say — can no longer change how a session behaves |
-| `XDG_DATA_HOME` | webapp / samples lookups | a user's leftover `~/.local/share/biopb/webapp` cannot shadow the bundle the site chose |
+| `--grpc-bind` | `0.0.0.0` | `127.0.0.1` |
+| TLS | `--tls` | `--no-tls` |
+| Client dials | `grpcs://<node>:<port>` directly | `grpc://localhost:<port>` through `ssh -L` |
 
-`XDG_CACHE_HOME` is redirected too, to node-local disk. biopb does not read it;
-the scientific stack underneath does, and those caches otherwise land in NFS home
-and get written by every concurrent session on the cluster at once.
+Neither mode is reachable from off campus; that's site policy, not this app.
 
-The install locations are resolved *before* these take effect, so a site that
-ships biopb as a module — setting `XDG_DATA_HOME` itself — still gets its own
-bundle. What the overrides neutralize is biopb's implicit fallbacks; every path
-this app depends on is passed explicitly (`--config`, `--static-dir`).
+### The certificate
 
-Two consequences worth knowing. Anything the UI writes through the admin pages
-(the MCP config) lands in the session directory and goes away with the session —
-it is not persistent user configuration. And the session ignores whatever biopb
-config the user keeps in their home; the data directory comes from the launch
-form and nowhere else.
+Flight TLS is trust-on-first-use: self-signed, no CA, pinned on first connect —
+or verified against the fingerprint the session card shows. It's per-account
+(not per-session), minted once and reused on every node without listing every
+node's name in it.
 
-## Using the data from Python, Java or napari
+Certificates are **never rotated automatically** — that would invalidate every
+client's existing pin. If a session warns that the certificate is expiring
+soon, relaunch with **Rotate Arrow Flight certificate** set to Yes. There is no
+in-place renewal in biopb — this mints a brand-new certificate, and every
+pinned client (a saved `tls_fingerprint`, not plain TOFU) must re-pin from the
+new fingerprint afterward.
 
-Arrow Flight is not published through the portal, so it needs the tunnel the
-session card shows:
+If the `tls` extra isn't installed, remote Flight falls back to loopback for
+that session rather than failing the launch.
+
+### Data access from Python, Java or napari
+
+Arrow Flight is never published through the portal — the OnDemand proxy is HTTP
+and can't carry gRPC. With **remote** Flight it's published on the compute node
+directly instead; the card gives you the endpoint and certificate fingerprint:
 
 ```python
 from biopb.tensor import TensorFlightClient
-client = TensorFlightClient("grpc://localhost:<grpc_port>", token="<token>")
+client = TensorFlightClient(
+    "grpcs://<node>:<grpc_port>",
+    token="<token>",
+    tls_fingerprint="<fingerprint from the session card>",   # optional; verifies the first connect
+)
 arr = client.get_tensor("<source_id>/<field>")   # lazy dask array
 ```
+
+Omit `tls_fingerprint` to pin on first use instead (stored in
+`~/.local/state/biopb/tls-known-hosts.json`, keyed by `host:port` — since the
+port changes every launch, each session is a fresh first-connect, which is why
+checking the fingerprint is worth doing rather than letting it pin silently).
+
+Don't pass `tls_ca_pem` as well as `tls_fingerprint` — the former silently wins
+and a wrong fingerprint would be accepted without error.
+
+With **loopback only**, run the `ssh -L` command from the card and dial
+`grpc://localhost:<grpc_port>` with no TLS argument.
 
 ## Troubleshooting
 
@@ -275,45 +170,10 @@ arr = client.get_tensor("<source_id>/<field>")   # lazy dask array
 | No form at all: "This app requires clusters that do not exist or you do not have access to" | the form file is not named `form.yml.erb`, so its ERB never ran and `cluster` is a literal `<%- … -%>` string. Otherwise: the cluster really is absent from `/etc/ood/config/clusters.d`, or your account is not allowed to submit to it |
 | Page loads blank, console 404s on `/assets/*` | the web bundle predates 0.13.0, or is from a different release than the CLI — the job output warns about this at startup |
 | Portal returns 503 / "failed to connect" | the control did not bind the node's interfaces; check `BIOPB_CONTROL_HOST` in the job output |
-| Connect button lands on a plain Apache "Not Found" (`Server at … Port 443` in the footer) | the portal never matched the route, so nothing reached the node. Either `node_uri` is not `/node`, or the host in the URL is not the form `host_regex` accepts — compare with a working app's link (`/node/<node>.<domain>/<port>/…`). Both in Site-specific settings |
+| Connect button lands on a plain Apache "Not Found" (`Server at … Port 443` in the footer) | the portal never matched the route — see [INSTALL.md](INSTALL.md#5-review-the-site-settings) for node URI / host naming |
 | Every request 404s, but the page itself loaded | the prefix biopb was told does not match what the portal sends |
 | `401 Unauthorized` | open the button from the card — it carries the token |
 | Catalog empty at first | still indexing; it fills in progressively |
 | Job exits immediately | `biopb` is missing, too old for `--url-prefix`, or the webapp bundle is absent — the error names which |
 
 Job output lands in the session directory under `~/ondemand/data/sys/dashboard/batch_connect/dev/`.
-
-## Testing changes without the portal
-
-`biopb control run` is an ordinary foreground process, so the app can be
-exercised from a normal Slurm job by rendering the templates with `erb` and
-supplying stand-ins for OnDemand's `find_port` / `port_used` / `create_passwd`
-helpers.
-
-One thing a hand-rolled `erb` run will *not* reproduce is the binding, and the
-two the dashboard uses are not the same:
-
-| file | binding | form values are |
-|---|---|---|
-| `submit.yml.erb` | an `OpenStruct` of the form (`SessionContext#to_openstruct`) | bare: `<%= qos %>` |
-| `template/*.erb` | `TemplateBinding.new(session, context)` — a two-member Struct, no `method_missing` | qualified: `<%= context.user_data_dir %>` |
-
-A bare form name in a staged template raises `undefined local variable or
-method` at submit time, which surfaces as a dashboard backtrace and no job.
-
-The portal hop is the one part that needs no portal to test: OnDemand's `/node/`
-route passes the path through unchanged, so requesting the prefix directly
-against the compute node is byte-for-byte what the proxy sends.
-
-```sh
-curl -s "http://<node>:<control_port>/node/<node>/<control_port>/" | head
-```
-
-That must come back with `<base href="/node/<node>/<control_port>/">` and asset
-URLs under the same prefix. Note the node name has to be the one your portal's
-`host_regex` accepts — the same FQDN `before.sh.erb` puts in the prefix, not the
-short name — or you are testing a path the proxy would never send.
-
-Both branches were validated end to end this way, including a PNG render
-round-trip; the [`tunnel`](../../tree/tunnel) branch additionally over a real
-ProxyJump tunnel.

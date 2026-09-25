@@ -1,3 +1,76 @@
+# --- one session per user --------------------------------------------------- #
+#
+# biopb's state tree is a singleton by construction: one control.pid, one
+# control.json, one credential, one session registry, and a CLI of
+# control start/stop/status. This app used to hand every session its own tree to
+# work around that. Serving one server per user instead makes the tree in NFS
+# home simply correct — and because ~/.local is mounted on every node, the TLS
+# certificate, the access token and the discovery record become stable across
+# sessions AND across nodes for free. That is the whole point of the change: the
+# cert problem stops needing a solution.
+#
+# Slurm is the authority for "is another session alive", not control.json. The
+# record is published on serve and retracted only on a *clean* stop, so scancel,
+# an OOM kill or a node failure leaves it behind — a record-based guard would
+# refuse to start forever, and the user could not fix it from the portal. Slurm
+# knows the job is gone. The record is consulted only for *where* to send them.
+BIOPB_JOB_NAME="biopb-browser"
+BIOPB_STATE="${HOME}/.local/state/biopb"
+
+# Every other live job of this app, one "<jobid> <node>" per line. COMPLETING is
+# included deliberately: such a job still holds its port and its state tree.
+others="$(squeue -h -u "${USER}" -n "${BIOPB_JOB_NAME}" \
+            -t RUNNING,CONFIGURING,COMPLETING -o '%i %N' 2>/dev/null \
+          | awk -v me="${SLURM_JOB_ID:-0}" '$1 != me' || true)"
+
+# Two launches a second apart would each see the other, so a plain "refuse if any
+# other exists" makes both yield and neither start. Slurm job ids are monotonic,
+# so let the elder win: each side applies the same tie-break to the same list and
+# exactly one proceeds. No lock file, and in particular no flock on NFS.
+elder="$(awk -v me="${SLURM_JOB_ID:-0}" '$1 < me {print; exit}' <<<"${others}" || true)"
+
+if [[ -n "${elder}" ]]; then
+  elder_id="${elder%% *}"
+  elder_node="${elder##* }"
+
+  # Qualify the node the same way this file qualifies its own, or the portal's
+  # host_regex may not match a short name and the link 404s past the proxy.
+  our_fqdn="$(timeout 5 hostname -f 2>/dev/null || true)"
+  case "${our_fqdn}" in
+    *.*) elder_node="${elder_node}.${our_fqdn#*.}" ;;
+  esac
+
+  # The port, and ONLY the port, comes from the discovery record: its "host" is
+  # the bind address (0.0.0.0 on this branch), which is not a name anything can
+  # dial. The node name comes from Slurm above.
+  elder_port=""
+  if [[ -r "${BIOPB_STATE}/control.json" ]]; then
+    elder_port="$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1]))["port"])
+except Exception: pass' "${BIOPB_STATE}/control.json" 2>/dev/null || true)"
+  fi
+
+  echo "ERROR: you already have a BioPB session running (job ${elder_id} on ${elder_node})." >&2
+  echo "       One server per user: this session would fight it for the same" >&2
+  echo "       credential, log and session registry in ${BIOPB_STATE}." >&2
+  if [[ -n "${elder_port}" ]]; then
+    echo "       Open the running one at /node/${elder_node}/${elder_port}/" >&2
+  else
+    echo "       It has not published its endpoint yet — give it a moment, then" >&2
+    echo "       open it from My Interactive Sessions." >&2
+  fi
+  echo "       To start fresh instead, delete that session and relaunch." >&2
+  exit 1
+fi
+
+# No live sibling. A record still sitting here is therefore from a job that did
+# not stop cleanly; drop it so nothing downstream (and no client discovering
+# through it) is pointed at a dead endpoint. biopb republishes on serve.
+if [[ -e "${BIOPB_STATE}/control.json" ]]; then
+  echo "Note: removing a stale control record left by a previous session." >&2
+  rm -f "${BIOPB_STATE}/control.json"
+fi
+
 # Allocate the ports and the access token for this session.
 #
 # BioPB runs three listeners and derives them from one base port, the same
@@ -15,8 +88,9 @@
 #
 # The control plane is published through OnDemand's own proxy, so it binds the
 # node's interfaces rather than loopback (see template/script.sh.erb). The
-# sidecar and the Flight plane stay on 127.0.0.1 — nothing outside the node
-# talks to them directly.
+# sidecar always stays on 127.0.0.1 — nothing outside the node talks to it. The
+# Flight plane follows the "Arrow Flight access" form field: published with TLS,
+# or loopback-only behind an ssh -L, decided further down this file.
 
 # --- what the portal will call this node ------------------------------------ #
 # OnDemand sets `host=$(hostname)` just before sourcing this file — the node's
@@ -84,7 +158,160 @@ export url_prefix="/node/${host}/${port}"
 # standing between this session and anyone else: the control port is open on the
 # node's interfaces so the portal can proxy to it, and even the loopback-bound
 # sidecar and Flight ports are reachable by every other user on this shared node.
-export biopb_token="$(create_passwd 32)"
+#
+# The token PERSISTS across sessions, so a token copied off the session card into
+# an SDK script or a napari profile keeps working after a relaunch. That is the
+# point of one server per user: the endpoint moves between nodes, but the
+# credential does not have to.
+#
+# It is kept in a directory this app owns, NOT in biopb's own
+# ~/.local/state/biopb/tensor-server.token. biopb writes that file on serve and
+# *removes* it on a clean stop (`biopb._credentials.remove_credential`, the same
+# publish/retract lifetime as control.json), so reading it back would hand out a
+# fresh token after every tidy shutdown — exactly the instability this avoids.
+#
+# The trade, stated plainly: a leaked token stays valid until it is rotated,
+# where a per-session token expired on its own. Rotate by deleting the file —
+# the next launch mints a new one, and every client holding the old one stops.
+BIOPB_OOD_STATE="${BIOPB_OOD_STATE_DIR:-${HOME}/.local/state/biopb-ood}"
+BIOPB_TOKEN_FILE="${BIOPB_OOD_STATE}/token"
+
+biopb_token=""
+if [[ -r "${BIOPB_TOKEN_FILE}" ]]; then
+  biopb_token="$(tr -d '[:space:]' < "${BIOPB_TOKEN_FILE}" || true)"
+  # A truncated or hand-edited file would otherwise fail biopb's own validation
+  # at startup, which is a confusing place to discover it. Check here and re-mint.
+  if [[ ! "${biopb_token}" =~ ^[A-Za-z0-9._~-]{16,128}$ ]]; then
+    echo "Note: ${BIOPB_TOKEN_FILE} does not hold a usable token; minting a new one." >&2
+    biopb_token=""
+  fi
+fi
+
+if [[ -z "${biopb_token}" ]]; then
+  biopb_token="$(create_passwd 32)"
+  mkdir -p "${BIOPB_OOD_STATE}"
+  chmod 700 "${BIOPB_OOD_STATE}" 2>/dev/null || true
+  # mktemp creates 0600, so the secret is never briefly world-readable, and the
+  # rename is atomic so a concurrent reader never sees a half-written token.
+  tmp="$(mktemp "${BIOPB_OOD_STATE}/.token.XXXXXX")"
+  printf '%s' "${biopb_token}" > "${tmp}"
+  mv -f "${tmp}" "${BIOPB_TOKEN_FILE}"
+fi
+export biopb_token
+
+# --- TLS for the Flight plane ----------------------------------------------- #
+#
+# Remote Flight (form: "Arrow Flight access") publishes the gRPC port on the
+# node's interfaces, and biopb turns TLS on by default as soon as that bind is
+# public. There is no CA: the client pins the leaf itself on first connect
+# (TOFU, biopb/biopb#604), or is given its fingerprint up front (what the
+# session card recommends) -- either way the anchor IS the presented
+# certificate, byte for byte.
+#
+# That fact is what makes minting unremarkable: gRPC verifies the DIALED name
+# against the cert's SANs, so a naive reading says the cert must name every node
+# the scheduler might land this job on. It does not. Whenever the anchor is the
+# presented leaf, biopb's client substitutes a name the cert DOES list before
+# checking (`_resolve_hostname_override`) -- safe specifically because no other,
+# validly-issued certificate can satisfy a pin that demands an exact byte match.
+# Measured directly: a cert minted on one node, served from another, connects
+# with neither a manual override nor any special client config, in both TOFU and
+# fingerprint-pinned mode. So the cert is minted once, wherever that first
+# happens to be, using biopb's own default (this host's names) -- and biopb's
+# state dir being NFS home is what makes "once" mean once for the account, not
+# once per node.
+#
+# (The one client-supplied mode this does NOT cover is an explicit `ca_pem` --
+# there, a *different* validly-issued cert could exist, so the SAN check stays
+# load-bearing. This app never asks anyone to use that mode.)
+#
+# NEVER rotated here. --force invalidates pins clients already hold, and doing
+# that silently at launch is the surprise this app exists to avoid.
+export flight_remote="<%= context.flight_remote %>"
+# Explicit, opt-in only -- rotation is a full cutover (new key, new leaf, every
+# existing client pin invalidated), never something to trigger silently. See
+# the "Rotate Arrow Flight certificate" field's help text.
+rotate_flight_cert="<%= context.rotate_flight_cert %>"
+# There is no in-place renewal in biopb: `cert init` either reuses the file
+# as-is or (`--force`) mints a brand-new keypair + leaf -- core/tls.py has no
+# third option that just extends the existing one's dates. So an expiring cert
+# has to be caught here, while there is still time to rotate deliberately,
+# rather than surfacing later as the cascading, hard-to-diagnose Flight
+# failure described in biopb-ood#1.
+FLIGHT_CERT_WARN_DAYS=30
+flight_fingerprint=""
+
+if [[ "${flight_remote}" == "true" ]]; then
+  # Same resolution as template/script.sh.erb, repeated rather than shared: this
+  # file is sourced before that one runs, and connection.yml -- which carries the
+  # fingerprint to the session card -- is written in between.
+  export PATH="${BIOPB_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
+  biopb_cert="${BIOPB_STATE}/tls/server-cert.pem"
+
+  if [[ "${rotate_flight_cert}" == "true" || ! -f "${biopb_cert}" ]]; then
+    force_flag=()
+    [[ "${rotate_flight_cert}" == "true" ]] && force_flag=(--force)
+    if biopb-tensor-server cert init "${force_flag[@]}" >/dev/null 2>&1; then
+      if [[ "${rotate_flight_cert}" == "true" ]]; then
+        echo "Note: rotated the Arrow Flight TLS certificate, by request. There" >&2
+        echo "      is no in-place renewal -- this is a brand-new key and leaf," >&2
+        echo "      shared by every future session on every node. Any script or" >&2
+        echo "      napari profile with a saved tls_fingerprint must be updated" >&2
+        echo "      from this session's card before it connects again; clients" >&2
+        echo "      relying on trust-on-first-use need no changes." >&2
+      else
+        echo "Note: minted a TLS certificate for Arrow Flight. It is reused by" >&2
+        echo "      every future session, on any node." >&2
+      fi
+    else
+      # Most likely the 'tls' extra is missing, in which case --tls would abort
+      # the launch outright. Downgrade to the tunnel instead: the session still
+      # works, and the failure is in the safe direction -- less exposed, not more.
+      echo "Warning: could not mint a TLS certificate, so Arrow Flight stays on" >&2
+      echo "         loopback for this session and the card will show an ssh -L" >&2
+      echo "         command. Install the 'tls' extra to enable remote Flight:" >&2
+      echo "           uv tool install --force 'biopb[web,tls]'" >&2
+      export flight_remote="false"
+    fi
+  fi
+
+  if [[ "${flight_remote}" == "true" && -f "${biopb_cert}" ]] \
+     && command -v openssl >/dev/null 2>&1; then
+    if openssl x509 -in "${biopb_cert}" -noout -checkend 0 2>/dev/null; then
+      # Not expired. Warn only inside the notice window -- a mint/rotate just
+      # above always clears this comfortably, so this fires only for a cert
+      # that has been sitting untouched and is now approaching its deadline.
+      if ! openssl x509 -in "${biopb_cert}" -noout \
+             -checkend $((FLIGHT_CERT_WARN_DAYS * 86400)) 2>/dev/null; then
+        cert_deadline="$(openssl x509 -in "${biopb_cert}" -noout -enddate 2>/dev/null \
+                          | sed 's/^notAfter=//')"
+        echo "Warning: the Arrow Flight TLS certificate expires ${cert_deadline}" >&2
+        echo "         -- within ${FLIGHT_CERT_WARN_DAYS} days. Relaunch with" >&2
+        echo "         'Rotate Arrow Flight certificate' set to Yes before then;" >&2
+        echo "         there is no in-place renewal, only a full rotation." >&2
+      fi
+    else
+      # Already expired: remote Flight would only fail every handshake from
+      # here (TLS validity is enforced even under a TOFU/fingerprint pin), so
+      # fall back to loopback rather than publish a port nothing can connect
+      # to -- the same safe-direction failure as a missing 'tls' extra above.
+      cert_deadline="$(openssl x509 -in "${biopb_cert}" -noout -enddate 2>/dev/null \
+                        | sed 's/^notAfter=//')"
+      echo "Warning: the Arrow Flight TLS certificate expired ${cert_deadline}." >&2
+      echo "         Remote Flight cannot work until it is rotated -- relaunch" >&2
+      echo "         with 'Rotate Arrow Flight certificate' set to Yes. Falling" >&2
+      echo "         back to loopback for this session in the meantime." >&2
+      export flight_remote="false"
+    fi
+  fi
+
+  if [[ "${flight_remote}" == "true" && -r "${biopb_cert}" ]] \
+     && command -v openssl >/dev/null 2>&1; then
+    flight_fingerprint="$(openssl x509 -in "${biopb_cert}" -noout -fingerprint -sha256 2>/dev/null \
+                          | sed 's/^.*=//' || true)"
+  fi
+fi
+export flight_fingerprint
 
 # Copied into connection.yml for the session card (see submit.yml.erb). The
 # username is resolved here rather than in the view, so the card does not depend

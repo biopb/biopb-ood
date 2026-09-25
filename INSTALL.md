@@ -198,9 +198,11 @@ module load biopb >/dev/null 2>&1 || true
 Or skip the module and edit the two defaults in `script.sh.erb` directly — a
 system app is site-owned, so hardcoding site paths there is legitimate.
 
-A site that sets `XDG_DATA_HOME` in the modulefile instead works too: the app
-resolves the bundle location *before* it redirects the XDG dirs per session, so a
-module-provided `XDG_DATA_HOME` is honored.
+A site that sets `BIOPB_DATA_HOME` in the modulefile instead works too: the app
+resolves the bundle location from the launching user's environment, so a
+module-provided `BIOPB_DATA_HOME` is honored (a legacy `XDG_DATA_HOME` is still
+read as a fallback here, though biopb itself no longer honors it — see
+biopb/biopb#790).
 
 ### 3. Install the app system-wide
 
@@ -228,16 +230,34 @@ copying a snippet.
 | Data directory default | `form.yml.erb`, `biopb_data_dir` in the ERB preamble | `~/data` when the user has one, else their home. Point it at your site's convention (a group share, `/scratch/$USER`) — home is the safe answer, not a good one, since the scan then walks everything under it |
 | QOS | form field, default `general` | change the default, or clear it to submit with no `--qos` |
 | Cluster | derived from `OodAppkit.clusters` | no edit needed |
-| Login host | derived from the cluster's `v2.login.host` | no edit needed; used only for the Arrow Flight tunnel |
+| Login host | derived from the cluster's `v2.login.host` | no edit needed; used only for the Arrow Flight tunnel, and only when the launch form asks for loopback Flight |
+| Arrow Flight access | form field, default remote (`grpcs://` on the node) | flip the default to `"false"` in `form.yml.erb` if your site firewalls compute nodes off from user workstations, or does not want the port published at all. See [Remote Arrow Flight](README.md#remote-arrow-flight) |
 | Cache size | form field, default 64 GB | **per session**, on node-local disk. A few concurrent sessions per node will find your real limit; lower it if `/tmp` is small |
 
 ### 6. Isolation you get for free
 
-Each session redirects all three XDG base dirs into its own staged job directory,
-so concurrent sessions cannot collide over logs, credentials or the session
-registry, and no user's stale `~/.config/biopb` or leftover
-`~/.local/share/biopb/webapp` can change how their session behaves. See
-[Isolation and multi-tenancy](README.md#isolation-and-multi-tenancy).
+Not by giving each session its own tree — biopb's state (`~/.config/biopb`,
+`~/.local/state/biopb`, `~/.local/share/biopb`) is a singleton by construction,
+one `control.pid`/credential/session-registry per account, so this app leaves it
+exactly where biopb puts it, unredirected, in the launching user's own home.
+
+What that buys a shared, site-wide install specifically:
+
+- **Different users sharing a compute node** are isolated from each other by
+  having separate home directories to begin with — nothing about a shared
+  `/apps/biopb/<version>` install changes that. The access token is what keeps
+  one user's data out of another's reach on the ports that *are* shared (the
+  control port is open on the node's interfaces; the sidecar and Flight ports,
+  though loopback-only, are reachable by every other user logged in to the same
+  node).
+- **The same user launching twice** is refused outright — `before.sh.erb` checks
+  Slurm (`squeue -u $USER -n biopb-browser`), not `control.json`, so a `scancel`
+  or OOM kill can't wedge the guard open. One session per user is the trade this
+  app makes instead of per-session isolation; the token and TLS certificate stay
+  stable across relaunches and nodes as a direct consequence.
+
+See [Isolation and multi-tenancy](README.md#isolation-and-multi-tenancy) for the
+full mechanics.
 
 ---
 

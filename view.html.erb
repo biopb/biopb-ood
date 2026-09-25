@@ -11,6 +11,10 @@
   jump       = login_host.to_s.strip.empty? ? "" : "-J #{user}@#{login_host.strip} "
   flight_cmd = "ssh -N -L #{grpc_port}:127.0.0.1:#{grpc_port} #{jump}#{user}@#{host}"
   uid        = "biopb-#{port}"
+  # What the launcher actually did, not what the form asked: before.sh.erb
+  # downgrades to loopback if it could not produce a certificate.
+  remote     = flight_remote.to_s == "true"
+  flight_url = remote ? "grpcs://#{host}:#{grpc_port}" : "grpc://localhost:#{grpc_port}"
 -%>
 
 <div style="margin-bottom:14px">
@@ -47,13 +51,87 @@
       <td><code><%= host %></code></td>
     </tr>
     <tr>
+      <th>Access token</th>
+      <td>
+        <div class="input-group">
+          <input type="text" readonly class="form-control" id="<%= uid %>-token"
+                 style="font-family:monospace;font-size:12px"
+                 value="<%= biopb_token %>">
+          <span class="input-group-btn">
+            <button class="btn btn-default" type="button"
+                    onclick="biopbCopy('<%= uid %>-token', this)">
+              <i class="fa fa-clipboard"></i> Copy
+            </button>
+          </span>
+        </div>
+        <p class="help-block" style="margin-top:4px">
+          The Connect button already carries this, so you only need it for an SDK
+          or napari client. It stays the same when you relaunch, so a copy saved
+          in a script keeps working. It gates the data <em>and</em> the admin API
+          — treat it as a password, and rotate it by deleting
+          <code>~/.local/state/biopb-ood/token</code>.
+        </p>
+      </td>
+    </tr>
+    <tr>
       <th>Arrow Flight</th>
       <td>
-        <code>grpc://127.0.0.1:<%= grpc_port %></code>
-        <p class="help-block" style="margin:4px 0 6px">
-          For the Python/Java SDK or napari. Unlike the web UI, this one is not
-          published through the portal — it stays on the node's loopback, so it
-          needs an SSH tunnel. Run this on your own computer and leave it going:
+        <div class="input-group">
+          <input type="text" readonly class="form-control" id="<%= uid %>-flighturl"
+                 style="font-family:monospace;font-size:12px" value="<%= flight_url %>">
+          <span class="input-group-btn">
+            <button class="btn btn-default" type="button"
+                    onclick="biopbCopy('<%= uid %>-flighturl', this)">
+              <i class="fa fa-clipboard"></i> Copy
+            </button>
+          </span>
+        </div>
+
+        <%- if remote -%>
+        <p class="help-block" style="margin-top:6px">
+          For the Python/Java SDK or napari. This one is published on the node
+          directly rather than through the portal, so there is no tunnel to keep
+          running — but it is only reachable from inside the campus network.
+          Connect with the access token above.
+        </p>
+        <%- if flight_fingerprint.to_s.strip.empty? -%>
+        <p class="help-block">
+          The connection is TLS, and your client pins the certificate the first
+          time it connects. That certificate belongs to your account alone, and
+          it is reused for every session on every node, so the pin keeps working
+          after a relaunch.
+        </p>
+        <%- else -%>
+        <p class="help-block" style="margin-bottom:4px">
+          <strong>Certificate fingerprint (SHA-256).</strong> The certificate is
+          self-signed, so your client trusts it by pinning it on first connect.
+          Check this value the first time — reading it here, over the portal's
+          authenticated HTTPS, is what makes that first connection trustworthy
+          rather than merely convenient. It is your account's own certificate and
+          is reused on every node, so the pin survives relaunches.
+        </p>
+        <div class="input-group">
+          <input type="text" readonly class="form-control" id="<%= uid %>-fp"
+                 style="font-family:monospace;font-size:11px"
+                 value="<%= flight_fingerprint %>">
+          <span class="input-group-btn">
+            <button class="btn btn-default" type="button"
+                    onclick="biopbCopy('<%= uid %>-fp', this)">
+              <i class="fa fa-clipboard"></i> Copy
+            </button>
+          </span>
+        </div>
+        <p class="help-block" style="margin-top:6px">
+          Passing it explicitly turns first-use trust into a verified
+          connection:<br>
+          <code style="font-size:11px">TensorClient("<%= flight_url %>", token=…, tls_fingerprint="<%= flight_fingerprint %>")</code>
+        </p>
+        <%- end -%>
+        <%- else -%>
+        <p class="help-block" style="margin:6px 0">
+          For the Python/Java SDK or napari. This session keeps Flight on the
+          node's loopback, so it needs an SSH tunnel. Run this on your own
+          computer and leave it going:
         </p>
         <div class="input-group">
           <input type="text" readonly class="form-control" id="<%= uid %>-flight"
@@ -67,15 +145,17 @@
           </span>
         </div>
         <p class="help-block" style="margin-top:4px">
-          Then connect to <code>grpc://localhost:<%= grpc_port %></code> with the
-          token from the link above.
+          Then connect to <code><%= flight_url %></code> with the token above.
           <%- if jump.empty? -%>
           If <code><%= host %></code> is not reachable from your machine, hop
           through your login host by adding
           <code>-J <%= user %>@&lt;login-host&gt;</code> — or set one in the
           launch form and it will be filled in here.
           <%- end -%>
+          Relaunch with <em>Arrow Flight access</em> set to remote to skip the
+          tunnel entirely.
         </p>
+        <%- end -%>
       </td>
     </tr>
   </tbody>
