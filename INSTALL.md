@@ -236,11 +236,28 @@ copying a snippet.
 
 ### 6. Isolation you get for free
 
-Each session redirects all three XDG base dirs into its own staged job directory,
-so concurrent sessions cannot collide over logs, credentials or the session
-registry, and no user's stale `~/.config/biopb` or leftover
-`~/.local/share/biopb/webapp` can change how their session behaves. See
-[Isolation and multi-tenancy](README.md#isolation-and-multi-tenancy).
+Not by giving each session its own tree — biopb's state (`~/.config/biopb`,
+`~/.local/state/biopb`, `~/.local/share/biopb`) is a singleton by construction,
+one `control.pid`/credential/session-registry per account, so this app leaves it
+exactly where biopb puts it, unredirected, in the launching user's own home.
+
+What that buys a shared, site-wide install specifically:
+
+- **Different users sharing a compute node** are isolated from each other by
+  having separate home directories to begin with — nothing about a shared
+  `/apps/biopb/<version>` install changes that. The access token is what keeps
+  one user's data out of another's reach on the ports that *are* shared (the
+  control port is open on the node's interfaces; the sidecar and Flight ports,
+  though loopback-only, are reachable by every other user logged in to the same
+  node).
+- **The same user launching twice** is refused outright — `before.sh.erb` checks
+  Slurm (`squeue -u $USER -n biopb-browser`), not `control.json`, so a `scancel`
+  or OOM kill can't wedge the guard open. One session per user is the trade this
+  app makes instead of per-session isolation; the token and TLS certificate stay
+  stable across relaunches and nodes as a direct consequence.
+
+See [Isolation and multi-tenancy](README.md#isolation-and-multi-tenancy) for the
+full mechanics.
 
 ---
 
