@@ -229,10 +229,11 @@ buys away the whole class of shared-state problems above.
 
 One consequence worth knowing: because state is no longer per-session, anything
 the UI writes through the admin pages (the MCP config) now persists in the
-user's home and outlives the session, and the control's log lands in
-`~/.local/state/biopb/logs` on NFS home — `biopb control run` hardcodes that path
-and exposes no flag for it. Left as is: at `--log-level INFO` with one server per
-user the volume is small.
+user's home and outlives the session, and the data plane's log lands in
+`~/.local/state/biopb/logs` on NFS home — passed explicitly via `--server-log`
+to `biopb-control run` (biopb/biopb#736). Left as is rather than also moved to
+node-local disk: at `--log-level INFO` with one server per user the volume is
+small.
 
 ## The executable-bit story
 
@@ -251,7 +252,7 @@ table; kept here only as a pointer so old links don't dead-end silently.
 
 ## Testing changes without the portal
 
-`biopb control run` is an ordinary foreground process, so the app can be
+`biopb-control run` is an ordinary foreground process, so the app can be
 exercised from a normal Slurm job by rendering the templates with `erb` and
 supplying stand-ins for OnDemand's `find_port` / `port_used` / `create_passwd`
 helpers.

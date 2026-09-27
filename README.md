@@ -3,7 +3,7 @@
 An OnDemand Batch Connect app that runs the full BioPB stack on a compute node so
 you can browse microscopy data stored on the cluster from a web browser.
 
-The session starts `biopb control run`, which is the entire deployment in one
+The session starts `biopb-control run`, which is the entire deployment in one
 foreground process:
 
 ```
@@ -57,7 +57,7 @@ loopback.
 | `form.yml.erb` | the launch form (the `.erb` suffix is what gets it rendered) |
 | `submit.yml.erb` | Slurm resources + which vars reach `view.html.erb` |
 | `template/before.sh.erb` | allocates ports + access token on the compute node |
-| `template/script.sh.erb` | writes the session config and runs `biopb control run` |
+| `template/script.sh.erb` | writes the session config and runs `biopb-control run` |
 | `view.html.erb` | the session card: Connect button, token, Flight endpoint or tunnel |
 
 `template/` is the part OnDemand stages into the job directory. Scripts placed
@@ -72,7 +72,7 @@ if you're wondering why that distinction matters.
 1. `before.sh.erb` refuses to start if you already have a session running (see
    [Isolation](#isolation-and-multi-tenancy)), then allocates ports, an access
    token, and the portal prefix.
-2. `script.sh.erb` runs `biopb control run` and waits for HTTP 200 on
+2. `script.sh.erb` runs `biopb-control run` and waits for HTTP 200 on
    `/data_plane/readyz` — meaning the data plane is genuinely serving, not
    just that the sidecar answered — for up to 15 minutes.
 3. The session card shows a Connect button carrying the token.
