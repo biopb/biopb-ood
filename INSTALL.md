@@ -15,7 +15,7 @@ which is what lets the UI be served under OnDemand's `/node/<host>/<port>/` path
 instead of at a domain root. Rather than compare version strings, ask the CLI:
 
 ```sh
-biopb control run --help | grep -- --url-prefix
+biopb-control run --help | grep -- --url-prefix
 ```
 
 Nothing printed means your biopb is too old: upgrade, or
@@ -121,7 +121,7 @@ Three things that look like mistakes and are not:
 #### Either way, check both halves
 
 ```sh
-biopb control run --help | grep -- --url-prefix
+biopb-control run --help | grep -- --url-prefix
 ls ~/.local/share/biopb/webapp/index.html
 ```
 

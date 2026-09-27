@@ -2,7 +2,7 @@
 #
 # Launch the BioPB stack for one OnDemand session.
 #
-# `biopb control run` is the whole deployment in one foreground process: it
+# `biopb-control run` is the whole deployment in one foreground process: it
 # serves the web UI, supervises the Arrow Flight data plane as a child, and
 # reverse-proxies that child's HTTP sidecar under /data_plane. It is the ONLY
 # component that serves the browser bundle — the tensor server's sidecar carries
@@ -49,13 +49,14 @@ export PATH="${BIOPB_BIN_DIR}:${PATH}"
 # two are what keep a user's leftover ~/.config/biopb or ~/.local/share/biopb
 # from changing how a session behaves.
 #
-# The one thing this gives up: the control's log now lands in
-# ~/.local/state/biopb/logs on NFS home rather than node-local disk. `biopb
-# control run` hardcodes that path (biopb/cli.py, server_log=_get_log_file()) and
-# exposes no flag for it. It IS movable — the argparse entry point
-# `python -m biopb_control run` takes --server-log — but that means launching
-# through the module rather than the CLI, so it is left alone for now: at
-# --log-level INFO with a single server per user the volume is small.
+# The one thing this gives up: the data plane's log lands in
+# ~/.local/state/biopb/logs on NFS home rather than node-local disk. Passed
+# explicitly below (--server-log) to `biopb-control run`, matching the path
+# biopb's own CLI used to hardcode (biopb/cli.py, server_log=_get_log_file())
+# before biopb/biopb#736 retired it -- deliberately kept as-is here rather than
+# also moving it to node-local disk (like SESSION_TMP below) in the same
+# change: at --log-level INFO with a single server per user the volume is
+# small, and that move is its own decision, not a side effect of this one.
 
 # The transcode cache goes on node-local disk, not NFS home: it is written
 # constantly, it is worthless after the job ends, and the file backend takes a
@@ -84,6 +85,17 @@ if ! command -v biopb >/dev/null 2>&1; then
   exit 1
 fi
 
+# `biopb-control` is its own console script (biopb-control/pyproject.toml),
+# installed alongside `biopb` by the same installer -- absent only if the
+# shared env is unusually broken, since the two always land together.
+if ! command -v biopb-control >/dev/null 2>&1; then
+  echo "ERROR: 'biopb-control' not found on PATH (biopb/biopb#736 -- this app" >&2
+  echo "       runs 'biopb-control run' directly rather than the retired" >&2
+  echo "       'biopb control run')." >&2
+  echo "Re-run the installer:  curl -fsSL https://biopb.org/install.sh | bash" >&2
+  exit 1
+fi
+
 if [[ ! -f "${WEBAPP_DIR}/index.html" ]]; then
   echo "ERROR: the web UI bundle is missing at ${WEBAPP_DIR}." >&2
   echo "Re-run the biopb installer to restore it." >&2
@@ -104,13 +116,17 @@ fi
 # biopb REQUIRES one, which this app has already supplied via
 # BIOPB_TENSOR_TOKEN; TLS is what stops it crossing the cluster network in the
 # clear, which is exactly what --no-tls on a public bind would do.
+# An array, not a string: `biopb-control run`'s --tls (biopb_control/__main__.py)
+# is a plain store_true with no --no-tls counterpart (unlike the retired typer
+# command's tri-state flag), so "off" means omitting it, not passing a value
+# argparse would reject.
 if [[ "${flight_remote:-false}" == "true" ]]; then
   grpc_bind="0.0.0.0"
-  tls_flag="--tls"
+  tls_flag=(--tls)
   flight_desc="${host}:${grpc_port}  (grpcs://, TLS)"
 else
   grpc_bind="127.0.0.1"
-  tls_flag="--no-tls"
+  tls_flag=()
   flight_desc="127.0.0.1:${grpc_port}  (loopback; reach it with ssh -L)"
 fi
 
@@ -150,7 +166,7 @@ echo "  Arrow Flight   : ${flight_desc}"
 # whose asset and API URLs are anchored at the *portal* root, so the page would
 # load nothing behind the proxy — and it would fail as a blank screen rather than
 # as an error. Refuse up front instead.
-if ! biopb control run --help 2>/dev/null | grep -q -- '--url-prefix'; then
+if ! biopb-control run --help 2>/dev/null | grep -q -- '--url-prefix'; then
   echo "ERROR: this biopb install does not support --url-prefix." >&2
   echo "       The portal-proxied app needs biopb/biopb#731, which shipped in" >&2
   echo "       biopb 0.14. Either upgrade biopb, or use this app's 'tunnel'" >&2
@@ -162,9 +178,10 @@ fi
 # The OnDemand proxy runs on the portal's web node and connects to this compute
 # node over the network, so the control cannot stay on loopback the way biopb's
 # default assumes. BIOPB_CONTROL_HOST is biopb's documented escape hatch for the
-# control bind (`_control_bind_endpoint`: "env still wins"). The access token
-# gates it; the sidecar is unaffected and stays on 127.0.0.1, and the Flight
-# plane binds wherever the form asked (see above).
+# control bind (`biopb.control._endpoints.control_host`: env var takes top
+# precedence over the served default). The access token gates it; the sidecar
+# is unaffected and stays on 127.0.0.1, and the Flight plane binds wherever the
+# form asked (see above).
 #
 # The cost, stated plainly: portal -> compute node is plain HTTP, so the token
 # crosses the cluster network in the clear (biopb/biopb#614 — the control has no
@@ -175,12 +192,21 @@ fi
 export BIOPB_CONTROL_HOST=0.0.0.0
 export BIOPB_TENSOR_TOKEN="${biopb_token}"
 
-biopb control run \
+# `biopb-control run`, not the retired `biopb control run` (biopb/biopb#736 --
+# the typer wrapper built the deployment in-process and never enforced the
+# fail-closed guard this entry point already carries on a public
+# --control-host). It takes the three listeners' host/port pairs individually
+# rather than deriving them from --base-port; before.sh.erb already computed
+# each one explicitly to pick them (find_base_port), so nothing new needs
+# resolving here.
+biopb-control run \
   --config "${CONFIG_FILE}" \
   --static-dir "${WEBAPP_DIR}" \
-  --base-port "${base_port}" \
-  --grpc-bind "${grpc_bind}" \
-  "${tls_flag}" \
+  --control-port "${control_port}" \
+  --grpc-host "${grpc_bind}" --grpc-port "${grpc_port}" \
+  --web-host 127.0.0.1 --web-port "${sidecar_port}" \
+  --server-log "${BIOPB_STATE}/logs/tensor-server.log" \
+  "${tls_flag[@]}" \
   --url-prefix "${url_prefix}" \
   --log-level INFO &
 CONTROL_PID=$!
