@@ -219,6 +219,15 @@ module-provided `BIOPB_DATA_HOME` is honored (a legacy `XDG_DATA_HOME` is still
 read as a fallback here, though biopb itself no longer honors it — see
 biopb/biopb#790).
 
+**`BIOPB_OOD_FLIGHT_HOST`**, set the same way, overrides the hostname a remote
+Flight session advertises (`flight_url`, and thus `--grpc-external-location`)
+without changing the name the portal itself uses to reach the node. Needed only
+when a compute node's interconnect (Infiniband/RoCE) is named differently from
+the `hostname -f` name the portal proxies through — e.g. `node03-ib` vs.
+`node03.cluster.example.edu` — so that a dask worker on another node dials the
+faster network instead of routing back through the management interface.
+Leave it unset unless you have observed that split on your cluster.
+
 ### 3. Install the app system-wide
 
 ```sh
