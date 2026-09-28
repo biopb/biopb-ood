@@ -20,6 +20,11 @@ batch_connect:
     # extra), so the card follows what actually happened, not what was asked.
     - flight_remote
     - flight_fingerprint
+    # The address a client should actually dial -- grpcs://<host>:<port> or the
+    # loopback grpc://, matching flight_remote. Computed once in before.sh.erb so
+    # the card and the launcher (--grpc-external-location, biopb/biopb#1158)
+    # never derive two different strings for the same session.
+    - flight_url
     # The portal path this session is published at. Derived in before.sh and
     # passed to both the launcher (--url-prefix) and the card (the link target),
     # so the address biopb was told and the address the button opens cannot drift.

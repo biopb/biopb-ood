@@ -313,6 +313,18 @@ if [[ "${flight_remote}" == "true" ]]; then
 fi
 export flight_fingerprint
 
+# What the Flight plane is actually reachable at, now that flight_remote has
+# settled (the cert checks above can still downgrade it to false). Computed
+# once, here, and shared rather than each consumer re-deriving it: script.sh.erb
+# passes it to `biopb-control run --grpc-external-location` (biopb/biopb#1158)
+# and connection.yml (below) hands the same string to view.html.erb for the
+# session card, so a client always sees the address the server itself advertises.
+if [[ "${flight_remote}" == "true" ]]; then
+  export flight_url="grpcs://${host}:${grpc_port}"
+else
+  export flight_url="grpc://localhost:${grpc_port}"
+fi
+
 # Copied into connection.yml for the session card (see submit.yml.erb). The
 # username is resolved here rather than in the view, so the card does not depend
 # on a dashboard helper being in scope when it renders.
