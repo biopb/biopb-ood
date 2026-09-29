@@ -15,7 +15,10 @@
 # refuse to start forever, and the user could not fix it from the portal. Slurm
 # knows the job is gone. The record is consulted only for *where* to send them.
 BIOPB_JOB_NAME="biopb-browser"
-BIOPB_STATE="${HOME}/.local/state/biopb"
+# Exported: script.sh.erb reads it too (--server-log), and it runs as a child
+# process of the shell that sources this file, so an unexported variable is gone
+# by then and `set -u` kills the launch with "BIOPB_STATE: unbound variable".
+export BIOPB_STATE="${HOME}/.local/state/biopb"
 
 # Every other live job of this app, one "<jobid> <node>" per line. COMPLETING is
 # included deliberately: such a job still holds its port and its state tree.
