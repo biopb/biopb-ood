@@ -24,8 +24,8 @@ against a biopb without the flag rather than letting the session come up blank.
 On 0.12.0 or earlier, use this app's [`tunnel`](../../tree/tunnel) branch, which
 reaches the same session over SSH and needs nothing from the portal.
 
-**biopb _(TBD — first release containing_
-[biopb/biopb#1158](https://github.com/biopb/biopb/issues/1158)_)_ or newer** —
+**biopb 0.15.0 or newer** (the first release containing
+[biopb/biopb#1158](https://github.com/biopb/biopb/issues/1158)) —
 the release whose control plane understands `--grpc-external-location`, which
 is what makes the Arrow Flight address this app hands out (the session card,
 and any `SerializedTensor`/dask graph the server forwards) match the address a
@@ -36,8 +36,7 @@ is versioned as a single unit against a specific biopb baseline (see "The CLI
 and the web bundle from the same release" below), so the requirement is
 enforced by that pairing, not by a second runtime check for a flag that will
 always be present or always absent together with `--url-prefix` on any release
-built after this line is filled in. Fill in the version above once
-biopb/biopb#1158 ships in a release.
+built from 0.15.0 on.
 
 **The CLI and the web bundle from the same release.** A new CLI with an old
 bundle starts cleanly and then serves a blank page. It matters more than the

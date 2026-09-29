@@ -21,7 +21,7 @@ has the rationale behind specific choices below, if you need it.
 
 ## Requirements
 
-- **biopb 0.13.0 or newer**, with a matching CLI and web bundle from the same
+- **biopb 0.15.0 or newer**, with a matching CLI and web bundle from the same
   release.
 - **Open OnDemand**, with Slurm and a home directory the compute nodes can see.
 
