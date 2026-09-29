@@ -316,6 +316,31 @@ if [[ "${flight_remote}" == "true" ]]; then
 fi
 export flight_fingerprint
 
+# What the Flight plane is actually reachable at, now that flight_remote has
+# settled (the cert checks above can still downgrade it to false). Computed
+# once, here, and shared rather than each consumer re-deriving it: script.sh.erb
+# passes it to `biopb-control run --grpc-external-location` (biopb/biopb#1158)
+# and connection.yml (below) hands the same string to view.html.erb for the
+# session card, so a client always sees the address the server itself advertises.
+#
+# `host` above is right for the portal, whose proxy reaches this node over
+# whatever network `hostname -f` names -- typically the management interface.
+# A cluster's compute nodes often expose the interconnect (Infiniband/RoCE) a
+# dask worker on another node should actually use under a *different* name
+# (e.g. "node03-ib" vs. "node03.cluster.example.edu"), and that name is a site
+# fact this app cannot discover, so it is a site override rather than a form
+# field: set BIOPB_OOD_FLIGHT_HOST in the app's environment (the modulefile,
+# same mechanism as BIOPB_BIN_DIR) if the portal-facing name is wrong for
+# Flight. Scoped to flight_url alone -- `host` itself is untouched, so the
+# portal target, url_prefix, and the SSH jump command in view.html.erb keep
+# using the name that is actually correct for *them*.
+flight_host="${BIOPB_OOD_FLIGHT_HOST:-${host}}"
+if [[ "${flight_remote}" == "true" ]]; then
+  export flight_url="grpcs://${flight_host}:${grpc_port}"
+else
+  export flight_url="grpc://localhost:${grpc_port}"
+fi
+
 # Copied into connection.yml for the session card (see submit.yml.erb). The
 # username is resolved here rather than in the view, so the card does not depend
 # on a dashboard helper being in scope when it renders.

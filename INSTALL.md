@@ -24,6 +24,20 @@ against a biopb without the flag rather than letting the session come up blank.
 On 0.12.0 or earlier, use this app's [`tunnel`](../../tree/tunnel) branch, which
 reaches the same session over SSH and needs nothing from the portal.
 
+**biopb 0.15.0 or newer** (the first release containing
+[biopb/biopb#1158](https://github.com/biopb/biopb/issues/1158)) —
+the release whose control plane understands `--grpc-external-location`, which
+is what makes the Arrow Flight address this app hands out (the session card,
+and any `SerializedTensor`/dask graph the server forwards) match the address a
+remote client can actually dial, instead of whatever loopback-remapped address
+the server happened to dial itself with internally. Unlike `--url-prefix`
+above, `script.sh.erb` does not probe the CLI for this flag at launch: this app
+is versioned as a single unit against a specific biopb baseline (see "The CLI
+and the web bundle from the same release" below), so the requirement is
+enforced by that pairing, not by a second runtime check for a flag that will
+always be present or always absent together with `--url-prefix` on any release
+built from 0.15.0 on.
+
 **The CLI and the web bundle from the same release.** A new CLI with an old
 bundle starts cleanly and then serves a blank page. It matters more than the
 usual version-skew hand-wringing here: builds before 0.13.0 baked
@@ -203,6 +217,15 @@ resolves the bundle location from the launching user's environment, so a
 module-provided `BIOPB_DATA_HOME` is honored (a legacy `XDG_DATA_HOME` is still
 read as a fallback here, though biopb itself no longer honors it — see
 biopb/biopb#790).
+
+**`BIOPB_OOD_FLIGHT_HOST`**, set the same way, overrides the hostname a remote
+Flight session advertises (`flight_url`, and thus `--grpc-external-location`)
+without changing the name the portal itself uses to reach the node. Needed only
+when a compute node's interconnect (Infiniband/RoCE) is named differently from
+the `hostname -f` name the portal proxies through — e.g. `node03-ib` vs.
+`node03.cluster.example.edu` — so that a dask worker on another node dials the
+faster network instead of routing back through the management interface.
+Leave it unset unless you have observed that split on your cluster.
 
 ### 3. Install the app system-wide
 

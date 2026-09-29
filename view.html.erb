@@ -12,9 +12,10 @@
   flight_cmd = "ssh -N -L #{grpc_port}:127.0.0.1:#{grpc_port} #{jump}#{user}@#{host}"
   uid        = "biopb-#{port}"
   # What the launcher actually did, not what the form asked: before.sh.erb
-  # downgrades to loopback if it could not produce a certificate.
+  # downgrades to loopback if it could not produce a certificate. flight_url
+  # itself comes from before.sh.erb via connection.yml (submit.yml.erb), so
+  # this card and --grpc-external-location always agree on the same string.
   remote     = flight_remote.to_s == "true"
-  flight_url = remote ? "grpcs://#{host}:#{grpc_port}" : "grpc://localhost:#{grpc_port}"
 -%>
 
 <div style="margin-bottom:14px">

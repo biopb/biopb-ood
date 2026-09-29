@@ -199,11 +199,20 @@ export BIOPB_TENSOR_TOKEN="${biopb_token}"
 # rather than deriving them from --base-port; before.sh.erb already computed
 # each one explicitly to pick them (find_base_port), so nothing new needs
 # resolving here.
+#
+# --grpc-external-location (biopb/biopb#1158) is what lets the tensor server
+# advertise flight_url -- the same address the session card shows -- to any
+# consumer it forwards a SerializedTensor or dask graph to, instead of baking
+# in whatever address it dialed itself with. flight_url already equals the
+# loopback default when flight_remote is false, so passing it is a no-op in
+# that case. Passed unconditionally, gated only by the biopb version this app
+# is paired with (see INSTALL.md), not by a runtime capability probe.
 biopb-control run \
   --config "${CONFIG_FILE}" \
   --static-dir "${WEBAPP_DIR}" \
   --control-port "${control_port}" \
   --grpc-host "${grpc_bind}" --grpc-port "${grpc_port}" \
+  --grpc-external-location "${flight_url}" \
   --web-host 127.0.0.1 --web-port "${sidecar_port}" \
   --server-log "${BIOPB_STATE}/logs/tensor-server.log" \
   "${tls_flag[@]}" \
