@@ -227,6 +227,16 @@ export BIOPB_TENSOR_TOKEN="${biopb_token}"
 # --control-port passed below; keep the two together.
 export BIOPB_CONTROL_PORT="${control_port}"
 
+# With the url_prefix, what the control publishes as the address the user's
+# browser reaches it by (`user_url` in its discovery record), which is the link
+# an agent hands the user. By environment, not a flag, so a biopb that predates it
+# ignores it rather than refusing to start.
+if [[ -n "${public_origin:-}" ]]; then
+  export BIOPB_PUBLIC_ORIGIN="${public_origin}"
+else
+  unset BIOPB_PUBLIC_ORIGIN
+fi
+
 # `biopb-control run`, not the retired `biopb control run` (biopb/biopb#736 --
 # the typer wrapper built the deployment in-process and never enforced the
 # fail-closed guard this entry point already carries on a public
