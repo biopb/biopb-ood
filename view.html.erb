@@ -16,6 +16,11 @@
   # itself comes from before.sh.erb via connection.yml (submit.yml.erb), so
   # this card and --grpc-external-location always agree on the same string.
   remote     = flight_remote.to_s == "true"
+  # Same rule: what before.sh.erb arranged (it found a JupyterLab), not what the
+  # form asked. `jupyter_requested` without `jupyter_enabled` is the notice below.
+  lab        = jupyter_enabled.to_s == "true"
+  lab_wanted = jupyter_requested.to_s == "true"
+  lab_url    = "#{jupyter_prefix}/lab?token=#{jupyter_token}"
 -%>
 
 <div style="margin-bottom:14px">
@@ -40,6 +45,41 @@
     either way.
   </p>
 </div>
+
+<%- if lab -%>
+<div style="margin-bottom:14px">
+  <a href="<%= lab_url %>" target="_blank" rel="noopener"
+     class="btn btn-default btn-lg">
+    <i class="fa fa-terminal"></i> Open JupyterLab
+  </a>
+  <p class="help-block" style="margin-top:8px">
+    <strong>Notebooks:</strong> pick the kernel <em>"biopb: connect to the running
+    biopb session"</em>. It runs in the same session as the viewer (<code>client</code>,
+    <code>ops</code>), so what you compute is there to look at in the web viewer;
+    the session has no napari window.
+  </p>
+  <p class="help-block">
+    <strong>Terminal:</strong> a shell on the compute node, for an AI agent you
+    have installed (Claude Code, Codex, opencode, …). Attach it to this
+    session — do not let it start one of its own, which would be a second kernel
+    with its own namespace. The address is in <code>$BIOPB_MCP_URL</code>; for
+    Claude Code:
+    <code style="display:block;margin-top:4px">claude mcp add --transport http biopb-session "$BIOPB_MCP_URL"</code>
+    Any other agent takes the same address as an HTTP MCP server.
+  </p>
+  <p class="help-block">
+    JupyterLab's link carries its own token (a login for a shell as you), and it
+    is new every session. It crosses the portal → node hop unencrypted, like the
+    biopb token above.
+  </p>
+</div>
+<%- elsif lab_wanted -%>
+<div class="alert alert-warning" style="margin-bottom:14px">
+  <strong>JupyterLab was requested, but none was found on this node.</strong>
+  The viewer is unaffected. Ask your site to put <code>jupyter-lab</code> on the
+  node's PATH, or see <em>Installing JupyterLab</em> in the app's INSTALL.md.
+</div>
+<%- end -%>
 
 <table class="table table-condensed" style="margin-bottom:0">
   <tbody>

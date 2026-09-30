@@ -155,6 +155,30 @@ The session card shows a **Connect** button — no tunnel. If it does not come
 ready, read the job output: every failure this app can anticipate is named there
 rather than left as a blank page.
 
+### 4. JupyterLab and an agent terminal (optional)
+
+Set **JupyterLab and agent terminal** to Yes on the launch form. The app does not
+install JupyterLab; it looks for one on the compute node, in this order:
+
+1. `BIOPB_OOD_JUPYTER` — the path to a `jupyter-lab` executable.
+2. `BIOPB_OOD_JUPYTER_MODULE` — an environment module to load first.
+3. `jupyter-lab` on `PATH`, then `~/.local/bin`.
+
+Most portals already have one for their own Jupyter app, and that is the one to
+use. Failing that, a separate tool environment is enough — do not add it to
+biopb's:
+
+```sh
+uv tool install jupyterlab
+```
+
+If none is found the session starts without it and the card says so; the viewer
+is unaffected. The notebook kernel *biopb: connect to the running biopb session*
+comes from biopb's own installer (skipped by `BIOPB_INSTALL_KERNELSPEC=0`), and
+runs in biopb's environment, so the Jupyter you point at needs nothing from biopb.
+
+See [README.md](README.md#jupyterlab-and-an-agent-terminal) for what it starts.
+
 ---
 
 ## B. Site-wide or group
@@ -227,6 +251,16 @@ the `hostname -f` name the portal proxies through — e.g. `node03-ib` vs.
 faster network instead of routing back through the management interface.
 Leave it unset unless you have observed that split on your cluster.
 
+**`BIOPB_OOD_JUPYTER`** and **`BIOPB_OOD_JUPYTER_MODULE`** name the site's
+JupyterLab for the optional JupyterLab feature (see
+[A.4](#4-jupyterlab-and-an-agent-terminal-optional)). Set the module, and the
+path if the module does not put `jupyter-lab` on `PATH`. The module is loaded
+around the Lab process only, so its `PYTHONPATH` never reaches biopb.
+**`BIOPB_OOD_JUPYTER_ORIGIN_PAT`** is for a portal whose proxy does not preserve
+the `Host` header: Lab then loads but its kernels and terminals fail with a
+403, and a regular expression for the portal's origin (e.g.
+`https://portal\.example\.edu`) is passed as `allow_origin_pat`.
+
 ### 3. Install the app system-wide
 
 ```sh
@@ -255,6 +289,8 @@ copying a snippet.
 | Cluster | derived from `OodAppkit.clusters` | no edit needed |
 | Login host | derived from the cluster's `v2.login.host` | no edit needed; used only for the Arrow Flight tunnel, and only when the launch form asks for loopback Flight |
 | Arrow Flight access | form field, default remote (`grpcs://` on the node) | flip the default to `"false"` in `form.yml.erb` if your site firewalls compute nodes off from user workstations, or does not want the port published at all. See [Remote Arrow Flight](README.md#remote-arrow-flight) |
+| JupyterLab | form field, default off | needs a JupyterLab the app can find; see [A.4](#4-jupyterlab-and-an-agent-terminal-optional). Uses the port after Flight (`base+6`), so a firewall that only opens the first three needs that one too |
+| Exclusive node | form field, default off | adds `--exclusive` when JupyterLab is on. **Read the security note in the README before turning JupyterLab on for a shared-node cluster** |
 | Cache size | form field, default 64 GB | **per session**, on node-local disk. A few concurrent sessions per node will find your real limit; lower it if `/tmp` is small |
 
 ### 6. Isolation you get for free

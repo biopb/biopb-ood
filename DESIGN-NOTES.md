@@ -49,10 +49,11 @@ keeps every listener on loopback and moves the whole session over SSH.
 
 The sidecar is unaffected: it stays on `127.0.0.1` always.
 
-One further consequence of the public bind: biopb gates the session console on
+One further consequence of the public bind: biopb gates the session's chat pane on
 the control's own bind address, so it is *off* in these sessions —
-`session console disabled: control bound to 0.0.0.0 (not loopback)` in the job
-output. The tunnel branch, whose control stays on loopback, keeps it.
+`session chat disabled: control bound to 0.0.0.0 (not loopback)` in the job
+output. The tunnel branch, whose control stays on loopback, keeps it. JupyterLab
+(below) is what stands in for it here.
 
 ## Why the Flight TLS pairing (`--grpc-bind` + `--tls`) is set together
 
@@ -284,6 +285,53 @@ short name — or you are testing a path the proxy would never send.
 Both branches were validated end to end this way, including a PNG render
 round-trip; the [`tunnel`](../../tree/tunnel) branch additionally over a real
 ProxyJump tunnel.
+
+## JupyterLab and the agent terminal
+
+Why it is built the way it is (`before.sh.erb` for whether, `script.sh.erb` for
+how).
+
+**One kernel, attached to by everyone.** The job asks the control for an
+agentless session (`POST /api/sessions/new`) rather than letting an agent's
+stdio shim spawn one. The shim's session is private to that agent and would be
+a second kernel with its own namespace, unseen by the notebook. The notebook
+reaches the session through the `biopb-session` kernel spec, a proxy that
+forwards every message to it; the agent attaches to the session's `/mcp` over
+HTTP, the transport the shim itself recommends. `BIOPB_MCP_URL` carries the
+address, read from the registry record because the launch reply names the
+session but not its endpoint.
+
+**Session first, then Lab.** A terminal inherits Lab's environment, so the
+session's address has to exist before Lab starts. A failed session still leaves
+Lab up (a notebook then says "no running biopb session"), and a Lab that never
+comes up leaves the viewer alone.
+
+**A private, node-local runtime dir.** `JUPYTER_RUNTIME_DIR` is set to a `0700`
+directory under the job's temp dir, before the control starts, so the session,
+Lab and the notebook proxy all agree on it. That keeps the kernel's connection
+file (its key is what protects it) off NFS, and means nothing left by a job on
+another node can be mistaken for this job's session.
+
+**A separate token, per job.** A Lab terminal is a shell as the user, where the
+biopb token only reads images, so it is neither the biopb token nor persisted
+across sessions. It is passed as `JUPYTER_TOKEN`, not on the command line, which
+`ps` shows to every user on the node.
+
+**Finding JupyterLab is a site setting.** The portal already has one; this app
+takes it by path, by module, or from `PATH` / `~/.local/bin`, and installs
+nothing. The module is loaded in a subshell to find it and again around the Lab
+process, never in the shell that runs biopb: a Jupyter module's `PYTHONPATH`
+would otherwise reach the session and kernel, which run on biopb's interpreter.
+
+**The `/mcp` exposure is an accepted, documented cost.** The session's endpoint
+has no token (it relies on a loopback Host/Origin check that stops browsers, not
+another user on the node), so a job sharing the node can run code as the user.
+The form's *Exclusive node* answers it by taking the whole node; the proper fix
+is a token on that endpoint in biopb.
+
+**The job's exit.** The exit trap stops Lab, which stops its kernels and
+terminals. The control, data plane and session are stopped by Slurm's cleanup at
+job end, as before; a `SIGTERM` to the script alone leaves them running.
 
 ## Branch history
 

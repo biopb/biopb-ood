@@ -180,6 +180,43 @@ attributes:
 
       Only takes effect when *Arrow Flight access* above is Remote.
 
+  enable_jupyter:
+    label: "JupyterLab and agent terminal"
+    widget: "select"
+    value: "false"
+    options:
+      - ["No — image browser only", "false"]
+      - ["Yes — also start JupyterLab on this node", "true"]
+    help: |
+      Starts JupyterLab beside the viewer, on the same node, and a BioPB session
+      with a kernel for it to use. Two things follow:
+
+      A notebook on the kernel *biopb: connect to the running biopb session* runs
+      in that session's namespace (`client`, `ops`), with no napari window — look
+      at results in the web viewer.
+
+      A JupyterLab terminal is a shell on the node, so you can run an AI agent
+      there (Claude Code, Codex, opencode, …) if you have installed one. Attach
+      it to the same session, not a second one of its own: the session card shows
+      the command.
+
+      Needs a JupyterLab this app can find on the node — see INSTALL.md.
+
+  exclusive_node:
+    label: "Exclusive node"
+    widget: "select"
+    value: "false"
+    options:
+      - ["No — share the node with other jobs", "false"]
+      - ["Yes — no other job on this node (--exclusive)", "true"]
+    help: |
+      Only matters with JupyterLab on. The session's local MCP endpoint is open to
+      every user logged in to the same node (it has no token of its own), so
+      another user's job on this node could run code as you through it. Choose Yes
+      to keep the node to yourself, at the cost of a longer queue wait and a whole
+      node charged to your account. Leave it at No if your site never places two
+      users on one node.
+
   qos:
     label: "QOS"
     value: "general"
@@ -215,5 +252,7 @@ form:
   - monitor_sources
   - flight_remote
   - rotate_flight_cert
+  - enable_jupyter
+  - exclusive_node
   - qos
   - login_host

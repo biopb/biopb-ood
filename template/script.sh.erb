@@ -70,7 +70,24 @@ CACHE_DIR="${SESSION_TMP}/cache"
 # are BIOPB_* and are deliberately left alone above.
 export XDG_CACHE_HOME="${SESSION_TMP}/xdg-cache"
 mkdir -p "${CACHE_DIR}" "${XDG_CACHE_HOME}"
-cleanup () { rm -rf "${SESSION_TMP}" 2>/dev/null || true; }
+
+# Jupyter's runtime dir holds the session kernel's connection file, whose key is
+# the only thing between another user on this node and that kernel. Node-local
+# and private to this job, rather than the default under NFS home: nothing else
+# there can be mistaken for this job's session (a file left by a job that ran on
+# another node), and nothing readable lands on shared storage. Exported before
+# the control starts so its session child and the Lab process both inherit it.
+# Harmless when JupyterLab is off: the session simply writes its file here.
+export JUPYTER_RUNTIME_DIR="${SESSION_TMP}/jupyter-runtime"
+mkdir -p "${JUPYTER_RUNTIME_DIR}"
+chmod 700 "${JUPYTER_RUNTIME_DIR}"
+# Set once JupyterLab is started (below); cleanup stops it, and it takes its
+# notebook kernels and terminals down with it.
+LAB_PID=""
+cleanup () {
+  if [[ -n "${LAB_PID}" ]]; then kill "${LAB_PID}" 2>/dev/null || true; fi
+  rm -rf "${SESSION_TMP}" 2>/dev/null || true
+}
 trap cleanup EXIT
 
 # Java is only needed for the Bio-Formats fallback readers (.zvi, .ims, .oif).
@@ -160,6 +177,9 @@ echo "  control (UI)   : 0.0.0.0:${control_port}  (portal proxy target)"
 echo "  published at   : ${url_prefix}/"
 echo "  HTTP sidecar   : 127.0.0.1:${sidecar_port}"
 echo "  Arrow Flight   : ${flight_desc}"
+if [[ "${jupyter_enabled:-false}" == "true" ]]; then
+  echo "  JupyterLab     : 0.0.0.0:${jupyter_port}  (published at ${jupyter_prefix}/)"
+fi
 
 # This branch serves the UI through OnDemand's proxy, which requires a biopb
 # carrying --url-prefix (biopb/biopb#731). Without it the control emits a shell
@@ -307,6 +327,114 @@ else
   echo "         initial scan can simply take longer than the wait, and the UI" >&2
   echo "         becomes usable as soon as it finishes. Check the log above, and" >&2
   echo "         /data_plane/readyz for a backend_error." >&2
+fi
+
+# --- JupyterLab and the session it works in --------------------------------- #
+#
+# Only when the form asked for it and before.sh.erb found a JupyterLab.
+#
+# Two things start here, in this order, and the order is the point.
+#
+# 1. A session: an agentless biopb session with a kernel, asked of the control
+#    (POST /api/sessions/new). It has no napari window -- nothing on a compute
+#    node has a display -- so results are looked at in the web viewer. It is the
+#    one kernel that a notebook (through the `biopb-session` kernel spec) and an
+#    agent (over http, below) both work in. An agent that spawned its own session
+#    through the stdio shim would get a second kernel with a different namespace,
+#    and the notebook would not see what it did.
+#
+# 2. JupyterLab, started *after* the session so that the session's address is
+#    already in the environment it inherits, and a terminal opened in Lab has
+#    BIOPB_MCP_URL to hand to an agent.
+#
+# Neither is fatal to the other, or to the viewer: a failed session leaves Lab up
+# (a notebook then answers "no running biopb session" until one exists), and a
+# Lab that never comes up leaves the viewer as it was.
+if [[ "${jupyter_enabled:-false}" == "true" ]]; then
+  # The wait is bounded below the curl timeout so a slow cold start comes back as
+  # "starting" from the control rather than as a curl error with a session still
+  # coming up behind it.
+  session_json="$(curl -s -m 175 -X POST \
+      -H "Authorization: Bearer ${biopb_token}" \
+      "http://127.0.0.1:${control_port}/api/sessions/new?client_timeout=170" 2>/dev/null || true)"
+  read -r session_state session_id < <(python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.argv[1])
+except Exception:
+    d = {}
+print(d.get("state") or "failed", d.get("session_id") or "-")
+' "${session_json}")
+
+  export BIOPB_MCP_URL=""
+  if [[ "${session_state}" == "started" ]]; then
+    # The control's reply names the session but not its /mcp address; that is in
+    # the registry record the session published (biopb._sessions).
+    BIOPB_MCP_URL="$(python3 -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("mcp_url") or "")
+except Exception:
+    print("")
+' "${BIOPB_SESSIONS_DIR:-${BIOPB_STATE}/sessions}/${session_id}.json")"
+  fi
+
+  if [[ -n "${BIOPB_MCP_URL}" ]]; then
+    echo "BioPB session ${session_id} is up; agent MCP endpoint ${BIOPB_MCP_URL}"
+  else
+    echo "WARNING: could not start a BioPB session for JupyterLab (${session_state})." >&2
+    echo "         Notebooks will report \"no running biopb session\". Look in the" >&2
+    echo "         viewer logs under ${BIOPB_STATE}/mcp/viewers/ for the reason." >&2
+  fi
+
+  # An array so an empty extra is no argument at all. The origin pattern is an
+  # escape hatch for a portal whose proxy does not preserve the Host header, which
+  # Jupyter's websocket origin check compares against; without one Lab loads but
+  # its kernels and terminals fail with a 403. See INSTALL.md.
+  lab_extra=()
+  if [[ -n "${BIOPB_OOD_JUPYTER_ORIGIN_PAT:-}" ]]; then
+    lab_extra+=("--ServerApp.allow_origin_pat=${BIOPB_OOD_JUPYTER_ORIGIN_PAT}")
+  fi
+
+  # The token goes in the environment, not on the command line: argv is world
+  # readable in ps on a shared node. The module (if any) is loaded around this
+  # process alone -- see before.sh.erb for why it must not reach the rest.
+  (
+    if [[ -n "${jupyter_module:-}" ]]; then
+      module load "${jupyter_module}" >/dev/null 2>&1 || true
+    fi
+    export JUPYTER_TOKEN="${jupyter_token}"
+    exec "${jupyter_bin}" --no-browser \
+      --ServerApp.ip=0.0.0.0 \
+      --ServerApp.port="${jupyter_port}" --ServerApp.port_retries=0 \
+      --ServerApp.base_url="${jupyter_prefix}" \
+      --ServerApp.allow_remote_access=True \
+      --ServerApp.root_dir="${HOME}" \
+      --MultiKernelManager.default_kernel_name=biopb-session \
+      "${lab_extra[@]}"
+  ) > "${STAGED_ROOT}/jupyter.log" 2>&1 &
+  LAB_PID=$!
+
+  lab_ready=0
+  for attempt in $(seq 1 60); do
+    if ! kill -0 "${LAB_PID}" 2>/dev/null; then
+      break
+    fi
+    lab_code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 \
+        -H "Authorization: token ${jupyter_token}" \
+        "http://127.0.0.1:${jupyter_port}${jupyter_prefix}/api/status" 2>/dev/null || true)"
+    if [[ "${lab_code}" == "200" ]]; then
+      lab_ready=1
+      break
+    fi
+    sleep 1
+  done
+  if [[ "${lab_ready}" == "1" ]]; then
+    echo "JupyterLab is ready, published at ${jupyter_prefix}/"
+  else
+    echo "WARNING: JupyterLab did not come up; its output is in ${STAGED_ROOT}/jupyter.log" >&2
+    tail -n 20 "${STAGED_ROOT}/jupyter.log" >&2 2>/dev/null || true
+  fi
 fi
 
 wait "${CONTROL_PID}"
