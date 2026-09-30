@@ -29,6 +29,13 @@ batch_connect:
     # passed to both the launcher (--url-prefix) and the card (the link target),
     # so the address biopb was told and the address the button opens cannot drift.
     - url_prefix
+    # JupyterLab beside the session. `jupyter_requested` is what the form asked
+    # for and `jupyter_enabled` what before.sh.erb could actually arrange (no
+    # JupyterLab found -> not enabled), so the card follows what happened.
+    - jupyter_requested
+    - jupyter_enabled
+    - jupyter_prefix
+    - jupyter_token
 
 script:
   job_name: "biopb-browser"
@@ -38,6 +45,9 @@ script:
     # edit here, they just clear the field.
     <%- unless qos.to_s.strip.empty? -%>
     - "--qos=<%= qos.strip %>"
+    <%- end -%>
+    <%- if enable_jupyter.to_s == "true" && exclusive_node.to_s == "true" -%>
+    - "--exclusive"
     <%- end -%>
     - "--nodes=1"
     - "--ntasks=1"

@@ -83,6 +83,7 @@ fi
 #                              the rest. This is the port you tunnel to.
 #   base + 4  HTTP sidecar   — the data-plane REST/WS API the UI calls
 #   base + 5  Arrow Flight   — the gRPC data plane (SDK clients, napari)
+#   base + 6  JupyterLab     — only when the launch form asks for it
 #
 # Allocating a *contiguous* base rather than three loose ports means this app
 # drives either biopb CLI generation unchanged: the 0.12.0 release takes
@@ -114,15 +115,17 @@ case "${fqdn}" in
 esac
 export host
 
-# Find a base port whose +3/+4/+5 offsets are all free. find_port already
-# returns something unused, so this only has to clear the three derived ports.
+# Find a base port whose +3..+6 offsets are all free. find_port already
+# returns something unused, so this only has to clear the derived ports. +6 is
+# checked even when JupyterLab is off, so the ports never depend on the form.
 find_base_port () {
   local h="$1" b attempt
   for attempt in $(seq 1 64); do
     b="$(find_port "${h}" 9000 60000)"
     if ! port_used "${h}:$((b + 3))" \
        && ! port_used "${h}:$((b + 4))" \
-       && ! port_used "${h}:$((b + 5))"; then
+       && ! port_used "${h}:$((b + 5))" \
+       && ! port_used "${h}:$((b + 6))"; then
       echo "${b}"
       return 0
     fi
@@ -131,7 +134,7 @@ find_base_port () {
 }
 
 base_port="$(find_base_port "${host}")" || {
-  echo "ERROR: could not find three consecutive free ports on ${host}" >&2
+  echo "ERROR: could not find four consecutive free ports on ${host}" >&2
   exit 1
 }
 
@@ -139,6 +142,7 @@ export base_port
 export control_port=$((base_port + 3))
 export sidecar_port=$((base_port + 4))
 export grpc_port=$((base_port + 5))
+export jupyter_port=$((base_port + 6))
 
 # OnDemand's canonical connection port. The control plane is the only listener a
 # human ever talks to, so that is what the portal proxies to.
@@ -339,6 +343,83 @@ if [[ "${flight_remote}" == "true" ]]; then
   export flight_url="grpcs://${flight_host}:${grpc_port}"
 else
   export flight_url="grpc://localhost:${grpc_port}"
+fi
+
+# --- JupyterLab beside the session ------------------------------------------ #
+#
+# Optional (form: "JupyterLab and agent terminal"). script.sh.erb starts it; what
+# has to be settled *here* is whether there is a JupyterLab to start, because the
+# session card is written from these variables before script.sh.erb runs, and it
+# must follow what actually happened, not what the form asked (the same shape as
+# the Flight certificate check above).
+#
+# No JupyterLab is installed for the user. biopb's own environment carries no
+# `jupyter` script on purpose, and a site running OnDemand almost always has one
+# already, for the portal's Jupyter app. The `biopb-session` kernel spec that the
+# biopb installer registers runs in biopb's own interpreter, so that Jupyter
+# needs nothing from biopb installed into it.
+#
+# Where to look, in order:
+#   BIOPB_OOD_JUPYTER          a path to a `jupyter-lab` executable. Set it in the
+#                              modulefile, next to BIOPB_BIN_DIR.
+#   BIOPB_OOD_JUPYTER_MODULE   an environment module to load first (`module load`).
+#   otherwise                  `jupyter-lab` on PATH, then ~/.local/bin, which is
+#                              where `uv tool install jupyterlab` puts it and a
+#                              batch job's PATH often lacks.
+#
+# The module is loaded in a subshell here, and again around the Lab process in
+# script.sh.erb -- never in this shell. A Jupyter module routinely sets PYTHONPATH
+# or LD_LIBRARY_PATH for its own Python, and loaded here that would leak into
+# biopb's control, session and kernel, which run on biopb's own interpreter.
+export jupyter_requested="<%= context.enable_jupyter %>"
+export jupyter_enabled="false"
+export jupyter_prefix="/node/${host}/${jupyter_port}"
+export jupyter_token=""
+export jupyter_bin=""
+export jupyter_module="${BIOPB_OOD_JUPYTER_MODULE:-}"
+
+find_jupyter () {
+  local cand
+  if [[ -n "${jupyter_module}" ]]; then
+    command -v module >/dev/null 2>&1 || return 1
+    module load "${jupyter_module}" >/dev/null 2>&1 || return 1
+  fi
+  if [[ -n "${BIOPB_OOD_JUPYTER:-}" ]]; then
+    cand="${BIOPB_OOD_JUPYTER}"
+  else
+    cand="$(command -v jupyter-lab 2>/dev/null || true)"
+    if [[ -z "${cand}" && -x "${HOME}/.local/bin/jupyter-lab" ]]; then
+      cand="${HOME}/.local/bin/jupyter-lab"
+    fi
+  fi
+  [[ -n "${cand}" && -x "${cand}" ]] || return 1
+  # Proves it runs in this environment (a broken shebang or a missing library
+  # fails here rather than as a Lab that never comes up).
+  "${cand}" --version >/dev/null 2>&1 || return 1
+  echo "${cand}"
+}
+
+if [[ "${jupyter_requested}" == "true" ]]; then
+  jupyter_bin="$(find_jupyter || true)"
+  if [[ -z "${jupyter_bin}" ]]; then
+    echo "Warning: JupyterLab was requested but none was found, so this session" >&2
+    echo "         starts without it. Put jupyter-lab on PATH, or set" >&2
+    echo "         BIOPB_OOD_JUPYTER (its path) or BIOPB_OOD_JUPYTER_MODULE (a" >&2
+    echo "         module that provides it) -- see INSTALL.md." >&2
+  else
+    export jupyter_enabled="true"
+    # Its own credential, not the biopb token, and not kept across sessions: a
+    # Lab terminal is a shell as you, where the biopb token only reads images. It
+    # dies with the job, so a copy of the link in browser history is inert.
+    jupyter_token="$(create_passwd 32)"
+    export jupyter_token
+    export jupyter_bin
+    if [[ ! -f "${JUPYTER_DATA_DIR:-${HOME}/.local/share/jupyter}/kernels/biopb-session/kernel.json" ]]; then
+      echo "Note: the 'biopb-session' Jupyter kernel is not registered for you, so" >&2
+      echo "      notebooks cannot join the biopb session. Re-run the biopb installer" >&2
+      echo "      (it is skipped by BIOPB_INSTALL_KERNELSPEC=0). Terminals still work." >&2
+    fi
+  fi
 fi
 
 # Copied into connection.yml for the session card (see submit.yml.erb). The

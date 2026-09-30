@@ -14,6 +14,7 @@ compute node (all listeners on 127.0.0.1)
     └── /data_plane/*      reverse proxy ──┐
   HTTP sidecar    base+4   <───────────────┘  data-plane REST + /ws/render
   Arrow Flight    base+5   gRPC data plane — Python/Java SDK, napari
+  JupyterLab      base+6   optional — notebooks and a terminal on this node
 ```
 
 **[INSTALL.md](INSTALL.md)** has the deployment steps. **[DESIGN-NOTES.md](DESIGN-NOTES.md)**
@@ -48,6 +49,37 @@ is accepted on that basis. A site that can't accept it should use the
 [`tunnel`](../../tree/tunnel) branch instead, which keeps every listener on
 loopback.
 
+## JupyterLab and an agent terminal
+
+Optional, off by default (form: **JupyterLab and agent terminal**). With it on,
+the job also starts an agentless BioPB session with a kernel, then JupyterLab at
+`/node/<host>/<base+6>/`, and the card gets an **Open JupyterLab** button.
+
+- **Notebooks** — pick the kernel *biopb: connect to the running biopb session*.
+  It runs in the session's namespace (`client`, `ops`), so it shares its kernel
+  with everything else attached. There is no napari window on a compute node;
+  look at results in the web viewer.
+- **A terminal** is a shell on the node, for an AI agent you have installed. The
+  session's MCP address is in `$BIOPB_MCP_URL`; attach the agent to it over HTTP
+  (Claude Code: `claude mcp add --transport http biopb-session "$BIOPB_MCP_URL"`)
+  so it works in the same kernel. An agent that spawns its own session through
+  the stdio shim gets a second kernel the notebook cannot see.
+- **Finding JupyterLab** is the site's business, not this app's: see
+  [INSTALL.md](INSTALL.md#4-jupyterlab-and-an-agent-terminal-optional).
+
+### Security
+
+- JupyterLab has its own token, new every session, in the link the card gives
+  you. A Lab terminal is a shell as you. Like the biopb token, it crosses the
+  portal → node hop in the clear.
+- The session's `/mcp` endpoint is on loopback with **no token of its own**, so on
+  a node shared with other users' jobs, any of them can run code as you through
+  it. The kernel itself is safe (its connection file is `0600`, in a private
+  directory on node-local disk). **Exclusive node** removes the exposure by
+  giving the job the whole node; leave it off only where two users never share
+  one. This is biopb's to fix properly (a token on the session endpoint).
+- The session and the agent see everything your account can.
+
 ## Files
 
 | File | Role |
@@ -57,7 +89,7 @@ loopback.
 | `form.yml.erb` | the launch form (the `.erb` suffix is what gets it rendered) |
 | `submit.yml.erb` | Slurm resources + which vars reach `view.html.erb` |
 | `template/before.sh.erb` | allocates ports + access token on the compute node |
-| `template/script.sh.erb` | writes the session config and runs `biopb-control run` |
+| `template/script.sh.erb` | writes the session config, runs `biopb-control run`, and (optionally) starts the session and JupyterLab |
 | `view.html.erb` | the session card: Connect button, token, Flight endpoint or tunnel |
 
 `template/` is the part OnDemand stages into the job directory. Scripts placed
@@ -75,7 +107,10 @@ if you're wondering why that distinction matters.
 2. `script.sh.erb` runs `biopb-control run` and waits for HTTP 200 on
    `/data_plane/readyz` — meaning the data plane is genuinely serving, not
    just that the sidecar answered — for up to 15 minutes.
-3. The session card shows a Connect button carrying the token.
+3. With JupyterLab on, `script.sh.erb` then asks the control for a session and
+   starts JupyterLab, in that order (see [DESIGN-NOTES.md](DESIGN-NOTES.md)).
+4. The session card shows a Connect button carrying the token, and an Open
+   JupyterLab button when JupyterLab is up.
 
 **Watch the data directory** (on by default) decides whether the session opens
 immediately with the catalog filling in behind it, or waits for a full scan of
