@@ -404,6 +404,20 @@ except Exception:
       module load "${jupyter_module}" >/dev/null 2>&1 || true
     fi
     export JUPYTER_TOKEN="${jupyter_token}"
+
+    # The web terminal is a server extension (jupyter_server_terminals), and an
+    # extension is only on if a config file says so. A module-installed Jupyter
+    # (Spack, Lmod) keeps each package in its own prefix, so those config files
+    # are not on Jupyter's search path: the package imports fine, yet the Lab has
+    # no terminals API and no Terminal tile. Turn it on -- but only when the
+    # merged config does not already name it, so a site that enabled it is left
+    # alone and one that disabled it on purpose is not overridden. (The separate
+    # `terminals_enabled = False` switch still wins either way.) Naming an
+    # extension that is not installed only logs a warning; Lab starts regardless.
+    if ! "${jupyter_bin}" --show-config 2>/dev/null | grep -q "jupyter_server_terminals"; then
+      lab_extra+=("--ServerApp.jpserver_extensions={'jupyter_server_terminals': True}")
+    fi
+
     exec "${jupyter_bin}" --no-browser \
       --ServerApp.ip=0.0.0.0 \
       --ServerApp.port="${jupyter_port}" --ServerApp.port_retries=0 \

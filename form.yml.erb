@@ -202,6 +202,17 @@ attributes:
 
       Needs a JupyterLab this app can find on the node — see INSTALL.md.
 
+  jupyter_module:
+    label: "JupyterLab module"
+    value: "<%= ENV.fetch("BIOPB_OOD_JUPYTER_MODULE", "").to_s[/\A[A-Za-z0-9._+\/-]+\z/] %>"
+    help: |
+      The environment module that provides JupyterLab, e.g. the one your portal's
+      own Jupyter app loads. Only used if you have no JupyterLab of your own
+      (`jupyter-lab` on your PATH, or in `~/.local/bin`) -- yours always wins.
+
+      Only matters with JupyterLab on. Leave it blank if you have your own, or
+      your site puts JupyterLab on the PATH already.
+
   exclusive_node:
     label: "Exclusive node"
     widget: "select"
@@ -253,6 +264,7 @@ form:
   - flight_remote
   - rotate_flight_cert
   - enable_jupyter
+  - jupyter_module
   - exclusive_node
   - qos
   - login_host

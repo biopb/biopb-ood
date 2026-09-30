@@ -81,6 +81,23 @@
 </div>
 <%- end -%>
 
+<%# OnDemand's own shell app, for a terminal that does not depend on JupyterLab
+    (which may have none, or none the site allows). It is the portal's terminal,
+    so the site's policy governs it: whether it will open a compute node at all is
+    the site's host allowlist, not something this app can see or change. -%>
+<div style="margin-bottom:14px">
+  <a href="/pun/sys/shell/ssh/<%= host %>" target="_blank" rel="noopener"
+     class="btn btn-default">
+    <i class="fa fa-terminal"></i> Open a shell on this node
+  </a>
+  <p class="help-block" style="margin-top:8px">
+    OnDemand's own shell, on <code><%= host %></code>, for running an AI agent
+    (Claude Code, Codex, opencode, …) next to this session. If the portal refuses
+    the host, your site does not allow shells on compute nodes; reach it with
+    <code>ssh <%= host %></code> instead.
+  </p>
+</div>
+
 <table class="table table-condensed" style="margin-bottom:0">
   <tbody>
     <tr>
