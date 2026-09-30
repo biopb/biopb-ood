@@ -212,6 +212,21 @@ fi
 export BIOPB_CONTROL_HOST=0.0.0.0
 export BIOPB_TENSOR_TOKEN="${biopb_token}"
 
+# Tell every biopb process started from this environment -- the session, and
+# whatever Lab's terminals launch -- where the control is. This control is a
+# foreground `biopb-control run` on an unconventional port, so it publishes
+# control.json but not the daemon pid file that `biopb control start` uses to
+# decide "already running". The biopb-mcp stdio shim runs that command on its
+# first tool call; without this it finds no daemon, sees the default 8813 free,
+# and starts a SECOND control there -- which then overwrites control.json, so the
+# session reports a loopback viewer URL on the wrong control instead of this
+# session's proxied one. BIOPB_CONTROL_PORT takes top precedence for both the
+# start path (`_control_bind_endpoint`) and every reader (`control_port`), so
+# the shim's start now targets a port that is in use and refuses, and clients
+# resolve to this control without consulting the record. It matches the
+# --control-port passed below; keep the two together.
+export BIOPB_CONTROL_PORT="${control_port}"
+
 # `biopb-control run`, not the retired `biopb control run` (biopb/biopb#736 --
 # the typer wrapper built the deployment in-process and never enforced the
 # fail-closed guard this entry point already carries on a public
