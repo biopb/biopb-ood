@@ -161,8 +161,12 @@ Set **JupyterLab and agent terminal** to Yes on the launch form. The app does no
 install JupyterLab; it looks for one on the compute node, in this order:
 
 1. `BIOPB_OOD_JUPYTER` — the path to a `jupyter-lab` executable.
-2. `BIOPB_OOD_JUPYTER_MODULE` — an environment module to load first.
-3. `jupyter-lab` on `PATH`, then `~/.local/bin`.
+2. The user's own: `jupyter-lab` on `PATH`, then `~/.local/bin`.
+3. The environment module named in the form's *JupyterLab module* field,
+   prefilled from `BIOPB_OOD_JUPYTER_MODULE` in the portal's environment.
+
+The module is tried last, so a JupyterLab the user installed is never shadowed by
+the site's.
 
 Most portals already have one for their own Jupyter app, and that is the one to
 use. Failing that, a separate tool environment is enough — do not add it to
@@ -171,6 +175,20 @@ biopb's:
 ```sh
 uv tool install jupyterlab
 ```
+
+A module-installed Jupyter (Spack, Lmod) often lacks the config files that switch
+on server extensions, so the Lab comes up with no Terminal even though the package
+is there. The app turns the terminal extension on unless the Lab's own
+configuration already names it, so a site that enabled it is left alone and one
+that disabled it (`jpserver_extensions`) is not overridden. Setting
+`terminals_enabled = False` in the site's Jupyter config turns terminals off
+regardless.
+
+The session card also links OnDemand's own shell app for the node
+(`/pun/sys/shell/ssh/<node>`), whether or not JupyterLab is on. That is the
+portal's terminal, so whether it will open a compute node is the site's host
+allowlist (`OOD_SSHHOST_ALLOWLIST`); if it refuses, the card's text points at plain
+`ssh`. It assumes the default `/pun/sys/shell` mount.
 
 If none is found the session starts without it and the card says so; the viewer
 is unaffected. The notebook kernel *biopb: connect to the running biopb session*
@@ -253,8 +271,9 @@ Leave it unset unless you have observed that split on your cluster.
 
 **`BIOPB_OOD_JUPYTER`** and **`BIOPB_OOD_JUPYTER_MODULE`** name the site's
 JupyterLab for the optional JupyterLab feature (see
-[A.4](#4-jupyterlab-and-an-agent-terminal-optional)). Set the module, and the
-path if the module does not put `jupyter-lab` on `PATH`. The module is loaded
+[A.4](#4-jupyterlab-and-an-agent-terminal-optional)). Set the module (in the
+portal's environment, where it prefills the form; a user can still change it),
+and the path if the module does not put `jupyter-lab` on `PATH`. The module is loaded
 around the Lab process only, so its `PYTHONPATH` never reaches biopb.
 **`BIOPB_OOD_JUPYTER_ORIGIN_PAT`** is for a portal whose proxy does not preserve
 the `Host` header: Lab then loads but its kernels and terminals fail with a

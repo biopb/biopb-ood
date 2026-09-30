@@ -1,3 +1,4 @@
+<% require "shellwords" -%>
 # --- one session per user --------------------------------------------------- #
 #
 # biopb's state tree is a singleton by construction: one control.pid, one
@@ -359,13 +360,19 @@ fi
 # biopb installer registers runs in biopb's own interpreter, so that Jupyter
 # needs nothing from biopb installed into it.
 #
-# Where to look, in order:
+# Where to look, in order -- the user's own install before the site's:
 #   BIOPB_OOD_JUPYTER          a path to a `jupyter-lab` executable. Set it in the
-#                              modulefile, next to BIOPB_BIN_DIR.
-#   BIOPB_OOD_JUPYTER_MODULE   an environment module to load first (`module load`).
-#   otherwise                  `jupyter-lab` on PATH, then ~/.local/bin, which is
+#                              modulefile, next to BIOPB_BIN_DIR. Explicit, so a
+#                              broken one is an error, not a reason to look on.
+#   the user's own             `jupyter-lab` on PATH, then ~/.local/bin, which is
 #                              where `uv tool install jupyterlab` puts it and a
 #                              batch job's PATH often lacks.
+#   the module                 the form's "JupyterLab module" (prefilled from
+#                              BIOPB_OOD_JUPYTER_MODULE in the portal's
+#                              environment), loaded only if nothing above worked.
+#
+# The module comes last on purpose: it prepends its own directories to PATH, so
+# loading it first would let the site's Lab shadow one the user installed.
 #
 # The module is loaded in a subshell here, and again around the Lab process in
 # script.sh.erb -- never in this shell. A Jupyter module routinely sets PYTHONPATH
@@ -376,36 +383,63 @@ export jupyter_enabled="false"
 export jupyter_prefix="/node/${host}/${jupyter_port}"
 export jupyter_token=""
 export jupyter_bin=""
-export jupyter_module="${BIOPB_OOD_JUPYTER_MODULE:-}"
+# Form value first, then the environment for a site that sets it there. Only a
+# module name's own characters get through: it is passed to `module load`.
+jupyter_module=<%= Shellwords.escape(context.jupyter_module.to_s.strip) %>
+jupyter_module="${jupyter_module:-${BIOPB_OOD_JUPYTER_MODULE:-}}"
+if [[ -n "${jupyter_module}" && ! "${jupyter_module}" =~ ^[A-Za-z0-9._+/-]+$ ]]; then
+  echo "Warning: ignoring JupyterLab module '${jupyter_module}': not a module name." >&2
+  jupyter_module=""
+fi
+export jupyter_module
 
+# Proves a candidate runs in this environment (a broken shebang or a missing
+# library fails here rather than as a Lab that never comes up).
+usable_jupyter () {
+  [[ -n "${1:-}" && -x "$1" ]] && "$1" --version >/dev/null 2>&1
+}
+
+# `own`: the explicit path, then the user's own install. `module`: the site's,
+# after loading the module. Both run in a command substitution, so a module
+# loaded here never reaches this shell.
 find_jupyter () {
   local cand
-  if [[ -n "${jupyter_module}" ]]; then
-    command -v module >/dev/null 2>&1 || return 1
-    module load "${jupyter_module}" >/dev/null 2>&1 || return 1
-  fi
-  if [[ -n "${BIOPB_OOD_JUPYTER:-}" ]]; then
-    cand="${BIOPB_OOD_JUPYTER}"
-  else
-    cand="$(command -v jupyter-lab 2>/dev/null || true)"
-    if [[ -z "${cand}" && -x "${HOME}/.local/bin/jupyter-lab" ]]; then
-      cand="${HOME}/.local/bin/jupyter-lab"
+  if [[ "${1}" == "own" ]]; then
+    if [[ -n "${BIOPB_OOD_JUPYTER:-}" ]]; then
+      usable_jupyter "${BIOPB_OOD_JUPYTER}" && echo "${BIOPB_OOD_JUPYTER}"
+      return
     fi
+    for cand in "$(command -v jupyter-lab 2>/dev/null || true)" "${HOME}/.local/bin/jupyter-lab"; do
+      if usable_jupyter "${cand}"; then echo "${cand}"; return 0; fi
+    done
+    return 1
   fi
-  [[ -n "${cand}" && -x "${cand}" ]] || return 1
-  # Proves it runs in this environment (a broken shebang or a missing library
-  # fails here rather than as a Lab that never comes up).
-  "${cand}" --version >/dev/null 2>&1 || return 1
-  echo "${cand}"
+  [[ -n "${jupyter_module}" ]] || return 1
+  command -v module >/dev/null 2>&1 || return 1
+  module load "${jupyter_module}" >/dev/null 2>&1 || return 1
+  cand="$(command -v jupyter-lab 2>/dev/null || true)"
+  usable_jupyter "${cand}" && echo "${cand}"
 }
 
 if [[ "${jupyter_requested}" == "true" ]]; then
-  jupyter_bin="$(find_jupyter || true)"
+  jupyter_bin="$(find_jupyter own || true)"
+  if [[ -n "${jupyter_bin}" ]]; then
+    # The user's own: script.sh.erb must not load a module around it, or the
+    # module's PATH entries would sit in front of it.
+    export jupyter_module=""
+  elif [[ -z "${BIOPB_OOD_JUPYTER:-}" ]]; then
+    jupyter_bin="$(find_jupyter module || true)"
+  fi
   if [[ -z "${jupyter_bin}" ]]; then
     echo "Warning: JupyterLab was requested but none was found, so this session" >&2
-    echo "         starts without it. Put jupyter-lab on PATH, or set" >&2
-    echo "         BIOPB_OOD_JUPYTER (its path) or BIOPB_OOD_JUPYTER_MODULE (a" >&2
-    echo "         module that provides it) -- see INSTALL.md." >&2
+    echo "         starts without it. Put jupyter-lab on PATH, or fill in the form's" >&2
+    echo "         JupyterLab module, or set BIOPB_OOD_JUPYTER (a path to" >&2
+    echo "         jupyter-lab) -- see INSTALL.md." >&2
+    if [[ -n "${BIOPB_OOD_JUPYTER:-}" ]]; then
+      echo "         (BIOPB_OOD_JUPYTER='${BIOPB_OOD_JUPYTER}' is not a working jupyter-lab)" >&2
+    elif [[ -n "${jupyter_module}" ]]; then
+      echo "         (module '${jupyter_module}' did not provide a working jupyter-lab)" >&2
+    fi
   else
     export jupyter_enabled="true"
     # Its own credential, not the biopb token, and not kept across sessions: a
