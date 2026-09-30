@@ -1,0 +1,50 @@
+# This script (`after.sh.erb`) is sourced by OnDemand's job wrapper right after
+# `script.sh` has been started in the background, and BEFORE it writes
+# connection.yml -- which is what turns the session card live. With no after.sh
+# the card goes live at once, while the control (and, later, JupyterLab) is still
+# starting, so the buttons lead to the portal's "failed to connect" page. Holding
+# the card here until what it links to is listening makes it appear when its links
+# work. (The stock OnDemand apps do the same with `wait_until_port_used`.)
+#
+# A loop of our own instead of that helper because it also has to notice the job
+# script dying: a launch that crashed before opening its port would otherwise
+# leave the session "starting" until the timeout.
+#
+# `host`, `port`, `jupyter_*` come from before.sh.erb, `SCRIPT_PID`, `port_used`
+# and `clean_up` from the wrapper.
+
+# 0: listening. 1: timed out. 2: the job script is gone. Probing is best effort: a
+# node with no way to test a port (port_used's 127) must not hold the card forever.
+biopb_wait_port () {
+  local what="$1" p="$2" secs="$3" i status
+  echo "Waiting for ${what} to open port ${p}..."
+  for ((i = 0; i < secs * 2; i++)); do
+    port_used "${host}:${p}"
+    status=$?
+    if [[ "${status}" == "0" ]]; then
+      echo "${what} is listening on port ${p}."
+      return 0
+    elif [[ "${status}" == "127" ]]; then
+      echo "Cannot probe ports on this node; not waiting for ${what}." >&2
+      return 0
+    fi
+    kill -0 "${SCRIPT_PID}" 2>/dev/null || return 2
+    sleep 0.5
+  done
+  return 1
+}
+
+# The control: without it there is no session, so give up the way the stock
+# after.sh does (clean_up stops the job script and ends the job).
+biopb_wait_port "BioPB" "${port}" 120 || {
+  echo "BioPB did not come up on port ${port}; see output.log above." >&2
+  clean_up 1
+}
+
+# JupyterLab is optional and starts last (after the session it attaches to), so
+# its port opens well after the control's. If it never does, say so and carry on:
+# the viewer works, and script.sh.erb has already logged why.
+if [[ "${jupyter_enabled:-false}" == "true" ]]; then
+  biopb_wait_port "JupyterLab" "${jupyter_port}" 120 || \
+    echo "WARNING: JupyterLab did not open port ${jupyter_port}; its card link may not work." >&2
+fi
