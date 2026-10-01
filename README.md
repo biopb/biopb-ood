@@ -23,7 +23,8 @@ has the rationale behind specific choices below, if you need it.
 ## Requirements
 
 - **biopb 0.15.0 or newer**, with a matching CLI and web bundle from the same
-  release.
+  release. The portal-origin setting (INSTALL.md) needs 0.15.2; without it
+  everything else works and the agent hands out a path instead of a full link.
 - **Open OnDemand**, with Slurm and a home directory the compute nodes can see.
 
 See [INSTALL.md](INSTALL.md) for single-user and site-wide setup — everything
@@ -58,7 +59,10 @@ the job also starts an agentless BioPB session with a kernel, then JupyterLab at
 - **Notebooks** — pick the kernel *biopb: connect to the running biopb session*.
   It runs in the session's namespace (`client`, `ops`), so it shares its kernel
   with everything else attached. There is no napari window on a compute node;
-  look at results in the web viewer.
+  look at results in the web viewer. The agent gives you the viewer link for the
+  portal, not the node's loopback one, when the site has set the portal's origin
+  (`BIOPB_PUBLIC_ORIGIN`, see [INSTALL.md](INSTALL.md#5-review-the-site-settings));
+  without it you get the path and open it on the portal you are already on.
 - **A terminal** is a shell on the node, for an AI agent you have installed. The
   session's MCP address is in `$BIOPB_MCP_URL`; attach the agent to it over HTTP
   (Claude Code: `claude mcp add --transport http biopb-session "$BIOPB_MCP_URL"`)

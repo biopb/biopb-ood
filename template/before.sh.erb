@@ -161,6 +161,30 @@ export port="${control_port}"
 # ood_portal.yml, change it here.
 export url_prefix="/node/${host}/${port}"
 
+# The portal's origin, as the user's browser addresses it (e.g.
+# https://ondemand.example.edu). The prefix alone is a path, and an agent that is
+# handed one can only tell the user "a path on the portal you opened"; with the
+# origin the control publishes the whole link (biopb/biopb#1195), so an agent
+# working in this session's terminal hands out a URL that opens. Nothing here can
+# derive it: the job does not know the portal's name, and the app's ERB does not
+# see the request. A site sets it once, either in the portal's environment (a
+# `BIOPB_PUBLIC_ORIGIN` entry in `pun_custom_env` in nginx_stage.yml) or in the
+# job's own (a module, the cluster's batch_connect env), which wins. Unset is
+# fine: the agent falls back to the path.
+#
+# Checked here because the control refuses to start on a value it cannot use,
+# which would fail the session over what is only a convenience.
+<% require "shellwords" %>
+portal_origin=<%= Shellwords.escape(ENV.fetch("BIOPB_PUBLIC_ORIGIN", "")) %>
+public_origin="${BIOPB_PUBLIC_ORIGIN:-${portal_origin}}"
+public_origin="${public_origin%/}"
+if [[ -n "${public_origin}" && ! "${public_origin}" =~ ^https?://[][A-Za-z0-9._-]+(:[0-9]+)?$ ]]; then
+  echo "WARNING: BIOPB_PUBLIC_ORIGIN='${public_origin}' is not a plain http(s)://host[:port]" >&2
+  echo "         origin; ignoring it, so the agent will be given the path only." >&2
+  public_origin=""
+fi
+export public_origin
+
 # Gates the web UI and the data API. Alphanumeric from create_passwd, which
 # satisfies biopb's 16-128 URL-safe character rule. It is the *only* thing
 # standing between this session and anyone else: the control port is open on the
