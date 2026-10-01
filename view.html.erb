@@ -1,10 +1,8 @@
 <%-
   user       = ood_user
-  # Land on the viewer, not the control dashboard: the viewer is what this app is
-  # for. `/viewer` is the SPA's declared route (no trailing slash); under the
-  # prefix the control strips it back off, and the injected <base href> keeps the
-  # SPA's assets resolving from the session root either way.
-  app_url    = "#{url_prefix}/viewer?token=#{biopb_token}"
+  # Land on the control dashboard, which shows the server's state and links on to
+  # the apps (data browser, viewer).
+  app_url    = "#{url_prefix}/?token=#{biopb_token}"
   # A login host is only needed to *reach* the compute node. Blank means either
   # the site's OnDemand config declares none or the user cleared it, so emit a
   # direct ssh rather than a `-J @` that cannot work.
@@ -25,53 +23,30 @@
 
 <div style="margin-bottom:14px">
   <a href="<%= app_url %>" target="_blank" rel="noopener"
-     class="btn btn-primary btn-lg">
-    <i class="fa fa-microscope"></i> Connect to BioPB
+     class="btn btn-primary btn-lg" style="min-width:18em;text-align:left">
+    <i class="fa fa-microscope fa-fw"></i> Connect to BioPB
   </a>
   <p class="help-block" style="margin-top:8px">
-    The link carries your access token; the app stores it and strips it from the
-    address bar. Use the button rather than typing the address by hand — without
-    the token you land on the unlock page.
-  </p>
-  <p class="help-block">
-    <strong>The catalog fills in while you browse.</strong> The session opens as
-    soon as the server is serving, so the sidebar starts with
-    <em>"Indexing data folder…"</em> and grows as files are found — a few
-    hundred sources takes a few minutes on a small core count. Nothing is wrong
-    if an image you expect is not listed yet. (Launching with
-    <em>Watch the data directory</em> set to No instead indexes everything
-    first, so the session itself takes that long to come up.) The control
-    dashboard, at <code><%= url_prefix %>/</code>, shows the server's state
-    either way.
+    The BioPB dashboard: shows the server status and links to the apps, such as
+    the data browser. Use this button rather than typing the address; it carries
+    your access token.
   </p>
 </div>
 
 <%- if lab -%>
 <div style="margin-bottom:14px">
   <a href="<%= lab_url %>" target="_blank" rel="noopener"
-     class="btn btn-default btn-lg">
-    <i class="fa fa-terminal"></i> Open JupyterLab
+     class="btn btn-default btn-lg" style="min-width:18em;text-align:left">
+    <i class="fa fa-book fa-fw"></i> Open JupyterLab
   </a>
   <p class="help-block" style="margin-top:8px">
-    <strong>Notebooks:</strong> pick the kernel <em>"biopb: connect to the running
-    biopb session"</em>. It runs in the same session as the viewer (<code>client</code>,
-    <code>ops</code>), so what you compute is there to look at in the web viewer;
-    the session has no napari window.
+    Drive a BioPB session from a notebook: pick the kernel
+    <em>"biopb: connect to the running biopb session"</em>.
   </p>
-  <p class="help-block">
-    <strong>Terminal:</strong> a shell on the compute node, for an AI agent you
-    have installed (Claude Code, Codex, opencode, …). Attach it to this
-    session — do not let it start one of its own, which would be a second kernel
-    with its own namespace. The address is in <code>$BIOPB_MCP_URL</code>; for
-    Claude Code:
-    <code style="display:block;margin-top:4px">claude mcp add --transport http biopb-session "$BIOPB_MCP_URL"</code>
-    Any other agent takes the same address as an HTTP MCP server.
-  </p>
-  <p class="help-block">
-    JupyterLab's link carries its own token (a login for a shell as you), and it
-    is new every session. It crosses the portal → node hop unencrypted, like the
-    biopb token above.
-  </p>
+  <p class="help-block" style="margin-top:-6px"><small>
+    JupyterLab can take up to a minute to start; if the button shows a
+    connection error, wait a moment and retry.
+  </small></p>
 </div>
 <%- elsif lab_wanted -%>
 <div class="alert alert-warning" style="margin-bottom:14px">
@@ -87,14 +62,13 @@
     the site's host allowlist, not something this app can see or change. -%>
 <div style="margin-bottom:14px">
   <a href="/pun/sys/shell/ssh/<%= host %>" target="_blank" rel="noopener"
-     class="btn btn-default">
-    <i class="fa fa-terminal"></i> Open a shell on this node
+     class="btn btn-default btn-lg" style="min-width:18em;text-align:left">
+    <i class="fa fa-terminal fa-fw"></i> Open Shell
   </a>
   <p class="help-block" style="margin-top:8px">
-    OnDemand's own shell, on <code><%= host %></code>, for running an AI agent
-    (Claude Code, Codex, opencode, …) next to this session. If the portal refuses
-    the host, your site does not allow shells on compute nodes; reach it with
-    <code>ssh <%= host %></code> instead.
+    OnDemand's own shell on <code><%= host %></code>, for running an AI agent next
+    to this session. If the portal refuses the host, your site does not allow
+    shells on compute nodes; use <code>ssh <%= host %></code> instead.
   </p>
 </div>
 
