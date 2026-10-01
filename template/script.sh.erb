@@ -416,9 +416,17 @@ except Exception:
   # process alone -- see before.sh.erb for why it must not reach the rest.
   (
     if [[ -n "${jupyter_module:-}" ]]; then
+      # What the job had before the module: a terminal in Lab gets these back
+      # (terminal-shell.sh). The module's PYTHONPATH is its own Python's, and the
+      # biopb tools an agent runs in that terminal are another's.
+      if [[ -n "${PYTHONPATH+x}" ]]; then export BIOPB_TERMINAL_PYTHONPATH="${PYTHONPATH}"; fi
+      if [[ -n "${PYTHONHOME+x}" ]]; then export BIOPB_TERMINAL_PYTHONHOME="${PYTHONHOME}"; fi
       module load "${jupyter_module}" >/dev/null 2>&1 || true
     fi
     export JUPYTER_TOKEN="${jupyter_token}"
+
+    # Once, since each run starts a Python.
+    lab_config="$("${jupyter_bin}" --show-config 2>/dev/null || true)"
 
     # The web terminal is a server extension (jupyter_server_terminals), and an
     # extension is only on if a config file says so. A module-installed Jupyter
@@ -429,8 +437,18 @@ except Exception:
     # alone and one that disabled it on purpose is not overridden. (The separate
     # `terminals_enabled = False` switch still wins either way.) Naming an
     # extension that is not installed only logs a warning; Lab starts regardless.
-    if ! "${jupyter_bin}" --show-config 2>/dev/null | grep -q "jupyter_server_terminals"; then
+    if ! grep -q "jupyter_server_terminals" <<<"${lab_config}"; then
       lab_extra+=("--ServerApp.jpserver_extensions={'jupyter_server_terminals': True}")
+    fi
+
+    # A Lab from a module hands its PYTHONPATH to every terminal; give them the
+    # job's own back (terminal-shell.sh). Only when a module was loaded, and not
+    # over a terminal command the site's config already sets. The path goes into
+    # a Python literal, so a quote in it is left alone rather than escaped.
+    if [[ -n "${jupyter_module:-}" && -f "${STAGED_ROOT}/terminal-shell.sh" \
+          && "${STAGED_ROOT}" != *\'* ]] \
+       && ! grep -q "terminado_settings" <<<"${lab_config}"; then
+      lab_extra+=("--ServerApp.terminado_settings={'shell_command': ['/bin/bash', '${STAGED_ROOT}/terminal-shell.sh']}")
     fi
 
     exec "${jupyter_bin}" --no-browser \
