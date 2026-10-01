@@ -143,7 +143,7 @@ ls ~/.local/share/biopb/webapp/index.html
 
 ```sh
 git clone https://github.com/biopb/biopb-ood.git \
-  ~/ondemand/dev/biopb-image-browser
+  ~/ondemand/dev/biopb-ood
 ```
 
 ### 3. Launch
@@ -296,7 +296,7 @@ the `Host` header: Lab then loads but its kernels and terminals fail with a
 
 ```sh
 git clone https://github.com/biopb/biopb-ood.git \
-  /var/www/ood/apps/sys/biopb-image-browser
+  /var/www/ood/apps/sys/biopb-ood
 ```
 
 It then appears for every portal user under **Interactive Apps**.
