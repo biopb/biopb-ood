@@ -65,15 +65,9 @@ attributes:
     value: "<%= biopb_data_dir %>"
     show_files: false
     help: |
-      The folder BioPB will index and serve. Everything under it is scanned
-      recursively. Point it at the parent of your image folders — no staging,
-      conversion or import step is needed; files stay in their original format.
-
-      Narrow it if you can. Your whole home works, and is the default when there
-      is nothing more specific to offer, but then the scan walks everything under
-      it — code checkouts, environments, caches — to find the images. A folder
-      that holds only data indexes faster and, with watching on, gives the
-      filesystem watcher far less to poll.
+      The folder BioPB indexes and serves, recursively, with files left in their
+      original format. Narrow it if you can: your whole home works, but the scan
+      then walks code, environments and caches too.
 
   bc_num_hours:
     label: "Hours"
@@ -90,8 +84,7 @@ attributes:
     max: 48
     step: 1
     help: |
-      Cores for transcoding and cache work. 8 is a good default; raise it for
-      large whole-slide images, many simultaneous viewers or heavy analysis.
+      8 is a good default; raise it for whole-slide images or heavy analysis.
 
   memory_gb:
     label: "Memory (GB)"
@@ -110,8 +103,8 @@ attributes:
     max: 2048
     step: 1
     help: |
-      On-demand transcoded chunks are cached on disk so revisiting an image is
-      fast. The cache is per-session and is deleted when the session ends.
+      Cache for transcoded chunks, so revisiting an image is fast. Deleted when
+      the session ends.
 
   monitor_sources:
     label: "Watch the data directory for changes"
@@ -121,19 +114,9 @@ attributes:
       - ["Yes — open now, index in the background (recommended)", "true"]
       - ["No  — index everything before opening", "false"]
     help: |
-      This decides *when the session opens*, not just whether new files are
-      noticed.
-
-      Yes: the server starts serving immediately and the catalog fills in behind
-      you, so the session is usable in seconds. Images appear as they are found,
-      and files you add mid-session show up too. The cost is that watching polls
-      the filesystem, which is real I/O on a large or slow shared filesystem.
-
-      No: every file is indexed before the server accepts its first connection,
-      so nothing is served — and the session does not come up — until the whole
-      directory has been walked. That is minutes on a large tree. Pick it when
-      you would rather wait once than have the catalog shift under you, or when
-      the folder is on a filesystem you would rather not have polled.
+      Yes: the session opens in seconds and images appear as they are found,
+      including files added later. Watching polls the filesystem.
+      No: the session opens only after the whole directory has been indexed.
 
   flight_remote:
     label: "Arrow Flight access"
@@ -143,21 +126,10 @@ attributes:
       - ["Remote — connect over grpcs:// from your own machine (recommended)", "true"]
       - ["Loopback only — reach it through an SSH tunnel", "false"]
     help: |
-      Where the Arrow Flight data plane listens. This is the gRPC port the
-      Python/Java SDK and napari use; it does not affect the web UI, which the
-      portal proxies either way.
-
-      Remote: Flight binds the node's interfaces and biopb turns TLS on, so a
-      client dials `grpcs://<node>:<port>` directly — no tunnel, and no
-      long-running ssh to babysit. Trust is a certificate your account owns and
-      no one else can read the key of; the session card shows its fingerprint to
-      check on first connect. The access token is required and crosses the
-      cluster network inside TLS.
-
-      Loopback only: Flight stays on 127.0.0.1 with no TLS, exactly as before,
-      and the card gives you the `ssh -L` command instead. Pick it if your
-      network blocks direct connections to compute nodes, or if you would rather
-      nothing but the portal be reachable.
+      How the Python/Java SDK and napari reach the data. Remote: connect directly
+      over TLS, no tunnel (the card shows the certificate fingerprint). Loopback
+      only: nothing but the portal is reachable; the card gives an `ssh -L`
+      command. The web UI is unaffected.
 
   rotate_flight_cert:
     label: "Rotate Arrow Flight certificate"
@@ -167,18 +139,9 @@ attributes:
       - ["No — keep the current certificate (recommended)", "false"]
       - ["Yes — mint a new one now", "true"]
     help: |
-      Only needed if a previous session warned that the certificate is
-      expiring. There is no renewal in biopb — every rotation mints a brand
-      new key and leaf, never extends the existing one — so this replaces the
-      certificate your whole account shares, on every node, immediately.
-
-      Any script or napari profile with a saved `tls_fingerprint` will stop
-      connecting until you copy the new value off this session's card and
-      update every place you saved the old one. Clients relying on
-      trust-on-first-use need no changes — they pin fresh on every session
-      already, since the Flight port changes each launch.
-
-      Only takes effect when *Arrow Flight access* above is Remote.
+      Only if a session warned that the certificate is expiring. It replaces your
+      account's certificate on every node; clients with a saved `tls_fingerprint`
+      must be updated. Remote Flight only.
 
   enable_jupyter:
     label: "JupyterLab and agent terminal"
@@ -188,28 +151,17 @@ attributes:
       - ["No — dashboard and data browser only", "false"]
       - ["Yes — also start JupyterLab on this node", "true"]
     help: |
-      Starts JupyterLab on the same node, and a BioPB session with a kernel for
-      it to use. Two things follow:
-
-      A notebook on the kernel *biopb: connect to the running biopb session* runs
-      in that session's namespace (`client`, `ops`), with no napari window — look
-      at results in the web viewer.
-
-      A JupyterLab terminal is a shell on the node, so you can run an AI agent
-      there (Claude Code, Codex, opencode, …) if you have installed one.
-
-      Needs a JupyterLab this app can find on the node — see INSTALL.md.
+      Adds JupyterLab on this node. A notebook on the kernel *biopb: connect to
+      the running biopb session* shares the session's `client` and `ops`, and its
+      terminal can run an AI agent you have installed. Needs a JupyterLab this app
+      can find (see INSTALL.md).
 
   jupyter_module:
     label: "JupyterLab module"
     value: "<%= ENV.fetch("BIOPB_OOD_JUPYTER_MODULE", "").to_s[/\A[A-Za-z0-9._+\/-]+\z/] %>"
     help: |
-      The environment module that provides JupyterLab, e.g. the one your portal's
-      own Jupyter app loads. Only used if you have no JupyterLab of your own
-      (`jupyter-lab` on your PATH, or in `~/.local/bin`) -- yours always wins.
-
-      Only matters with JupyterLab on. Leave it blank if you have your own, or
-      your site puts JupyterLab on the PATH already.
+      The environment module that provides JupyterLab, used only if you have none
+      of your own. Leave blank if you do, or your site puts it on the PATH.
 
   exclusive_node:
     label: "Exclusive node"
@@ -219,37 +171,25 @@ attributes:
       - ["No — share the node with other jobs", "false"]
       - ["Yes — no other job on this node (--exclusive)", "true"]
     help: |
-      Only matters with JupyterLab on. The session's local MCP endpoint is open to
-      every user logged in to the same node (it has no token of its own), so
-      another user's job on this node could run code as you through it. Choose Yes
-      to keep the node to yourself, at the cost of a longer queue wait and a whole
-      node charged to your account. Leave it at No if your site never places two
-      users on one node.
+      With JupyterLab on, the session's local endpoint has no token, so another
+      user's job on the same node could run code as you. Yes keeps the node to
+      yourself, for a longer queue wait. No is fine if your site never shares nodes.
 
   qos:
     label: "QOS"
     value: "general"
     help: |
-      Slurm quality-of-service for the job. Leave it blank to let Slurm apply
-      your account's default — no `--qos` is passed then.
-
-      On this cluster: `general` (the default, 21-day limit), `himem`,
-      `interactive`, `debug`, `preemptible`. `sacctmgr show assoc user=$USER
-      format=QOS` lists the ones your account may actually use; a QOS you are
-      not entitled to is rejected at submit time.
+      Slurm quality of service. Blank uses your account's default. Here:
+      `general` (21-day limit), `himem`, `interactive`, `debug`, `preemptible`.
+      `sacctmgr show assoc user=$USER format=QOS` lists the ones you may use.
 
   login_host:
     label: "SSH login host"
     value: "<%= biopb_login_host %>"
     help: |
-      The host you normally SSH into. Prefilled from your cluster's OnDemand
-      configuration; correct it if your site uses a different name from off-site.
-
-      Used for one thing only: the Arrow Flight tunnel command on the session
-      card, and only when *Arrow Flight access* above is set to loopback. The web
-      UI never needs it — the portal proxies that — and neither does remote
-      Flight, which is dialed directly. Leave it blank if you reach compute nodes
-      without a jump host.
+      Used only for the tunnel command on the card, with Arrow Flight set to
+      loopback. Prefilled from your cluster's OnDemand configuration. Blank if you
+      reach compute nodes without a jump host.
 
 form:
   - cluster
