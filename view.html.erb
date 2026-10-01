@@ -23,8 +23,8 @@
 
 <div style="margin-bottom:14px">
   <a href="<%= app_url %>" target="_blank" rel="noopener"
-     class="btn btn-primary btn-lg">
-    <i class="fa fa-microscope"></i> Connect to BioPB
+     class="btn btn-primary btn-lg" style="min-width:18em;text-align:left">
+    <i class="fa fa-microscope fa-fw"></i> Connect to BioPB
   </a>
   <p class="help-block" style="margin-top:8px">
     The BioPB dashboard: shows the server status and links to the apps, such as
@@ -36,8 +36,8 @@
 <%- if lab -%>
 <div style="margin-bottom:14px">
   <a href="<%= lab_url %>" target="_blank" rel="noopener"
-     class="btn btn-default btn-lg">
-    <i class="fa fa-terminal"></i> Open JupyterLab
+     class="btn btn-default btn-lg" style="min-width:18em;text-align:left">
+    <i class="fa fa-terminal fa-fw"></i> Open JupyterLab
   </a>
   <p class="help-block" style="margin-top:8px">
     Notebooks and a terminal on the compute node. JupyterLab starts after BioPB
@@ -62,8 +62,8 @@
     the site's host allowlist, not something this app can see or change. -%>
 <div style="margin-bottom:14px">
   <a href="/pun/sys/shell/ssh/<%= host %>" target="_blank" rel="noopener"
-     class="btn btn-default">
-    <i class="fa fa-terminal"></i> Open a shell on this node
+     class="btn btn-default btn-lg" style="min-width:18em;text-align:left">
+    <i class="fa fa-terminal fa-fw"></i> Open a shell on this node
   </a>
   <p class="help-block" style="margin-top:8px">
     OnDemand's own shell on <code><%= host %></code>, for running an AI agent next
