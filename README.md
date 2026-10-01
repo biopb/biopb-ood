@@ -55,8 +55,8 @@ loopback.
 ## JupyterLab and an agent terminal
 
 Optional, off by default (form: **JupyterLab and agent terminal**). With it on,
-the job also starts an agentless BioPB session with a kernel, then JupyterLab at
-`/node/<host>/<base+6>/`, and the card gets an **Open JupyterLab** button.
+the job also starts JupyterLab at `/node/<host>/<base+6>/`, and the card gets
+an **Open JupyterLab** button.
 
 - **Notebooks** — pick the kernel *biopb: connect to the running biopb session*.
   It runs in the session's namespace (`client`, `ops`), so it shares its kernel
