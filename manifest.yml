@@ -1,20 +1,23 @@
 ---
-name: "BioPB Image Browser"
+name: "BioPB"
 category: "Interactive Apps"
-subcategory: "Visualization"
+subcategory: "Bioimage Analysis"
 role: "batch_connect"
 icon: "fa://microscope"
 description: |
-  Browse microscopy data stored on the cluster in your web browser.
+  Work with microscopy data stored on the cluster: browse and view it, analyse
+  it from notebooks, or drive it with an AI agent.
 
-  Starts the full BioPB stack (control plane + Arrow Flight data plane + web UI)
-  on a compute node. The data plane transcodes your images on demand into a
-  multi-resolution pyramid, so whole-slide and larger-than-memory datasets open
-  without any staging or import step. Reads formats including OME-Zarr,
-  OME-TIFF, CZI, ND2, LIF, NDTiff, DICOM and NIfTI directly from disk.
+  Starts the BioPB stack on a compute node: a dashboard and data browser, an
+  Arrow Flight data plane, and a session (a Python kernel with the data client and
+  image-processing operations) that notebooks and agents share. Optionally also
+  JupyterLab. The data plane reads formats including OME-Zarr, OME-TIFF, CZI,
+  ND2, LIF, NDTiff, DICOM and NIfTI directly from disk and serves them as
+  multi-resolution pyramids, so whole-slide and larger-than-memory datasets need
+  no staging or import step.
 
-  The browser UI is served through the portal itself: the session card has a
-  Connect button and there is no tunnel to run. The Arrow Flight data plane, for
-  SDK and napari clients, is published on the compute node over TLS by default —
-  the card gives you the endpoint and the certificate fingerprint. A launch-form
-  field keeps it on loopback behind an SSH tunnel instead.
+  The web UI is served through the portal itself: the session card has a Connect
+  button and there is no tunnel to run. The Arrow Flight data plane, for SDK and
+  napari clients, is published on the compute node over TLS by default — the card
+  gives you the endpoint and the certificate fingerprint. A launch-form field
+  keeps it on loopback behind an SSH tunnel instead.

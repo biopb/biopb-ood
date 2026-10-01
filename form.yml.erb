@@ -91,7 +91,7 @@ attributes:
     step: 1
     help: |
       Cores for transcoding and cache work. 8 is a good default; raise it for
-      large whole-slide images or many simultaneous viewers.
+      large whole-slide images, many simultaneous viewers or heavy analysis.
 
   memory_gb:
     label: "Memory (GB)"
@@ -185,20 +185,18 @@ attributes:
     widget: "select"
     value: "false"
     options:
-      - ["No — image browser only", "false"]
+      - ["No — dashboard and data browser only", "false"]
       - ["Yes — also start JupyterLab on this node", "true"]
     help: |
-      Starts JupyterLab beside the viewer, on the same node, and a BioPB session
-      with a kernel for it to use. Two things follow:
+      Starts JupyterLab on the same node, and a BioPB session with a kernel for
+      it to use. Two things follow:
 
       A notebook on the kernel *biopb: connect to the running biopb session* runs
       in that session's namespace (`client`, `ops`), with no napari window — look
       at results in the web viewer.
 
       A JupyterLab terminal is a shell on the node, so you can run an AI agent
-      there (Claude Code, Codex, opencode, …) if you have installed one. Attach
-      it to the same session, not a second one of its own: the session card shows
-      the command.
+      there (Claude Code, Codex, opencode, …) if you have installed one.
 
       Needs a JupyterLab this app can find on the node — see INSTALL.md.
 

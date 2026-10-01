@@ -1,4 +1,4 @@
-# Installing the BioPB Image Browser
+# Installing BioPB for Open OnDemand
 
 Two deployments, and they differ in more than scale — pick one before you start.
 
@@ -148,10 +148,10 @@ git clone https://github.com/biopb/biopb-ood.git \
 
 ### 3. Launch
 
-In the portal: **Develop → My Sandbox Apps (Development)**, then *BioPB Image
-Browser*. Pick a data directory and submit.
+In the portal: **Develop → My Sandbox Apps (Development)**, then *BioPB*. Pick a
+data directory and submit.
 
-The session card shows a **Connect** button — no tunnel. If it does not come
+The session card shows a **Connect** button (to the BioPB dashboard) — no tunnel. If it does not come
 ready, read the job output: every failure this app can anticipate is named there
 rather than left as a blank page.
 
@@ -202,8 +202,8 @@ portal's terminal, so whether it will open a compute node is the site's host
 allowlist (`OOD_SSHHOST_ALLOWLIST`); if it refuses, the card's text points at plain
 `ssh`. It assumes the default `/pun/sys/shell` mount.
 
-If none is found the session starts without it and the card says so; the viewer
-is unaffected. The notebook kernel *biopb: connect to the running biopb session*
+If none is found the session starts without it and the card says so; the rest
+of the session is unaffected. The notebook kernel *biopb: connect to the running biopb session*
 comes from biopb's own installer (skipped by `BIOPB_INSTALL_KERNELSPEC=0`), and
 runs in biopb's environment, so the Jupyter you point at needs nothing from biopb.
 

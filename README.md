@@ -1,7 +1,8 @@
-# BioPB Image Browser — Open OnDemand app
+# BioPB — Open OnDemand app
 
-An OnDemand Batch Connect app that runs the full BioPB stack on a compute node so
-you can browse microscopy data stored on the cluster from a web browser.
+An OnDemand Batch Connect app that runs the BioPB stack on a compute node, so you
+can work with microscopy data stored on the cluster from a web browser: browse and
+view it, analyse it in notebooks, or have an AI agent do it.
 
 The session starts `biopb-control run`, which is the entire deployment in one
 foreground process:
@@ -9,7 +10,7 @@ foreground process:
 ```
 compute node (all listeners on 127.0.0.1)
   control plane   base+3   serves the web UI, proxies everything below
-    ├── /                  the React SPA (dashboard, /viewer, /admin)
+    ├── /                  the React SPA (dashboard, data browser, viewer, /admin)
     ├── /api/*             control API (status, data-plane verbs)
     └── /data_plane/*      reverse proxy ──┐
   HTTP sidecar    base+4   <───────────────┘  data-plane REST + /ws/render
@@ -95,7 +96,7 @@ the job also starts an agentless BioPB session with a kernel, then JupyterLab at
 | `submit.yml.erb` | Slurm resources + which vars reach `view.html.erb` |
 | `template/before.sh.erb` | allocates ports + access token on the compute node |
 | `template/script.sh.erb` | writes the session config, runs `biopb-control run`, and (optionally) starts the session and JupyterLab |
-| `view.html.erb` | the session card: Connect button, token, Flight endpoint or tunnel |
+| `view.html.erb` | the session card: the Connect, JupyterLab and shell buttons, token, Flight endpoint or tunnel |
 
 `template/` is the part OnDemand stages into the job directory. Scripts placed
 outside it are never staged.
@@ -114,8 +115,10 @@ if you're wondering why that distinction matters.
    just that the sidecar answered — for up to 15 minutes.
 3. With JupyterLab on, `script.sh.erb` then asks the control for a session and
    starts JupyterLab, in that order (see [DESIGN-NOTES.md](DESIGN-NOTES.md)).
-4. The session card shows a Connect button carrying the token, and an Open
-   JupyterLab button when JupyterLab is up.
+4. The session card shows a Connect button (to the BioPB dashboard) carrying the
+   token, an Open JupyterLab button when JupyterLab is on, and an Open Shell
+   button. The card goes live once the control is listening; JupyterLab can take
+   a little longer.
 
 **Watch the data directory** (on by default) decides whether the session opens
 immediately with the catalog filling in behind it, or waits for a full scan of
