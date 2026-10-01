@@ -208,7 +208,7 @@ The guard uses Slurm as its authority, not `control.json`:
 
 | | |
 |---|---|
-| liveness | `squeue -u $USER -n biopb-browser`, counting `RUNNING`, `CONFIGURING` and `COMPLETING` |
+| liveness | `squeue -u $USER -n biopb-ood`, counting `RUNNING`, `CONFIGURING` and `COMPLETING` |
 | where to send the user | the node from Slurm, the port from `control.json` — that record's `host` is the *bind* address (`0.0.0.0`), not a routable name |
 | simultaneous launches | the lower job id wins; both sides apply the same tie-break to the same list, so exactly one proceeds and no lock file is needed |
 

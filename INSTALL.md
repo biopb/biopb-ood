@@ -342,7 +342,7 @@ What that buys a shared, site-wide install specifically:
   though loopback-only, are reachable by every other user logged in to the same
   node).
 - **The same user launching twice** is refused outright — `before.sh.erb` checks
-  Slurm (`squeue -u $USER -n biopb-browser`), not `control.json`, so a `scancel`
+  Slurm (`squeue -u $USER -n biopb-ood`), not `control.json`, so a `scancel`
   or OOM kill can't wedge the guard open. One session per user is the trade this
   app makes instead of per-session isolation; the token and TLS certificate stay
   stable across relaunches and nodes as a direct consequence.
