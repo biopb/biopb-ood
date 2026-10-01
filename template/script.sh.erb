@@ -172,6 +172,16 @@ else
   flight_desc="127.0.0.1:${grpc_port}  (loopback; reach it with ssh -L)"
 fi
 
+# The persistent catalog (hand-drawn ROIs, decode-rate measurements) gets a fixed
+# file. biopb otherwise names it by a digest of this config's path, and this
+# config lives in the per-launch session directory, so every launch would open a
+# new catalog and lose the last one's ROIs. Next to the token, which has the same
+# lifetime: the user's, across launches. DuckDB holds an exclusive lock on it, so
+# the one-session guard in before.sh.erb is what keeps two sessions off it.
+# before.sh.erb computes the same directory but does not export it.
+CATALOG_FILE="${BIOPB_OOD_STATE_DIR:-${HOME}/.local/state/biopb-ood}/catalog.duckdb"
+mkdir -p "$(dirname "${CATALOG_FILE}")"
+
 # `server.port` is how the released control tells its data-plane child which
 # Flight port to bind; newer builds pass it explicitly and ignore this. Setting
 # it is correct either way.
@@ -186,6 +196,10 @@ cat > "${CONFIG_FILE}" <<JSON
     "backend": "file",
     "file_cache_dir": "${CACHE_DIR}",
     "file_max_total_gb": <%= context.cache_gb %>
+  },
+  "catalog": {
+    "persist": true,
+    "store_path": "${CATALOG_FILE}"
   },
   "sources": [
     {
