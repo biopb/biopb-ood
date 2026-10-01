@@ -200,6 +200,7 @@ copying a snippet.
 | JupyterLab | form field, default off | needs a JupyterLab the app can find; see [A.4](#4-jupyterlab-and-terminal-optional). Uses the port after Flight (`base+6`), so a firewall that only opens the first three needs that one too |
 | Exclusive node | form field, default off | adds `--exclusive` when JupyterLab is on. **Read the security note in the README before turning JupyterLab on for a shared-node cluster** |
 | Cache size | form field, default 64 GB | **per session**, on node-local disk. A few concurrent sessions per node will find your real limit; lower it if `/tmp` is small |
+| Cache location | `${TMPDIR:-/tmp}/biopb-ood-<jobid>/cache`, in `template/script.sh.erb` | the job's own directory on the compute node's **local disk**, deleted when the job ends. It is written constantly, so it should not be on NFS or RAM: if `TMPDIR` (or `/tmp`) is `tmpfs`, a network filesystem, or has less free space than the cache size, the job output warns. Point `TMPDIR` at local scratch in the job environment if `/tmp` is a poor fit. Not `$SLURM_TMPDIR` or `$LOCAL_SCRATCH`, which this app does not read |
 
 ---
 
