@@ -15,7 +15,7 @@
 # an OOM kill or a node failure leaves it behind — a record-based guard would
 # refuse to start forever, and the user could not fix it from the portal. Slurm
 # knows the job is gone. The record is consulted only for *where* to send them.
-BIOPB_JOB_NAME="biopb-browser"
+BIOPB_JOB_NAME="biopb-ood"
 # Exported: script.sh.erb reads it too (--server-log), and it runs as a child
 # process of the shell that sources this file, so an unexported variable is gone
 # by then and `set -u` kills the launch with "BIOPB_STATE: unbound variable".
