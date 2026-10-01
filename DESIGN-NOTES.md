@@ -225,7 +225,7 @@ that file on serve and *removes* it on a clean stop, so reading it back would
 hand out a fresh token after every tidy shutdown.
 
 What this gives up is two concurrent sessions with different data directories or
-different resource shapes. For an image browser that is a thin use case, and it
+different resource shapes. For a single-user session that is a thin use case, and it
 buys away the whole class of shared-state problems above.
 
 One consequence worth knowing: because state is no longer per-session, anything
