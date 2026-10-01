@@ -1,8 +1,9 @@
 # BioPB — Open OnDemand app
 
-An OnDemand Batch Connect app that runs the BioPB stack on a compute node, so you
-can work with microscopy data stored on the cluster from a web browser: browse and
-view it, analyse it in notebooks, or have an AI agent do it.
+**Agentic bio-image analysis.** An OnDemand Batch Connect app that runs the BioPB
+stack on a compute node, so you can work with microscopy data stored on the
+cluster from a web browser: analyse it in notebooks or with an AI agent, and
+browse and view it.
 
 The session starts `biopb-control run`, which is the entire deployment in one
 foreground process:

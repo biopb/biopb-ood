@@ -5,8 +5,9 @@ subcategory: "Bioimage Analysis"
 role: "batch_connect"
 icon: "fa://microscope"
 description: |
-  Work with microscopy data stored on the cluster: browse and view it, analyse
-  it from notebooks, or drive it with an AI agent.
+  Agentic bio-image analysis on the cluster: work with microscopy data where it
+  is stored, from notebooks or with an AI agent, and browse and view it in your
+  web browser.
 
   Starts the BioPB stack on a compute node: a dashboard and data browser, an
   Arrow Flight data plane, and a session (a Python kernel with the data client and
