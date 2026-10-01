@@ -23,7 +23,8 @@ has the rationale behind specific choices below, if you need it.
 ## Requirements
 
 - **biopb 0.15.0 or newer**, with a matching CLI and web bundle from the same
-  release.
+  release. The portal-origin setting (INSTALL.md) needs 0.15.2; without it
+  everything else works and the agent hands out a path instead of a full link.
 - **Open OnDemand**, with Slurm and a home directory the compute nodes can see.
 
 See [INSTALL.md](INSTALL.md) for single-user and site-wide setup — everything
