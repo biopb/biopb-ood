@@ -3,14 +3,16 @@
 # connection.yml -- which is what turns the session card live. With no after.sh
 # the card goes live at once, while the control (and, later, JupyterLab) is still
 # starting, so the buttons lead to the portal's "failed to connect" page. Holding
-# the card here until what it links to is listening makes it appear when its links
-# work. (The stock OnDemand apps do the same with `wait_until_port_used`.)
+# the card here until the control is listening makes it appear when its main link
+# works. (The stock OnDemand apps do the same with `wait_until_port_used`.)
+# JupyterLab starts last and can take minutes; the card does not wait for it, as
+# most sessions go to BioPB first. Its button works once Lab is up.
 #
 # A loop of our own instead of that helper because it also has to notice the job
 # script dying: a launch that crashed before opening its port would otherwise
 # leave the session "starting" until the timeout.
 #
-# `host`, `port`, `jupyter_*` come from before.sh.erb, `SCRIPT_PID`, `port_used`
+# `host` and `port` come from before.sh.erb, `SCRIPT_PID`, `port_used`
 # and `clean_up` from the wrapper.
 
 # 0: listening. 1: timed out. 2: the job script is gone. Probing is best effort: a
@@ -40,11 +42,3 @@ biopb_wait_port "BioPB" "${port}" 120 || {
   echo "BioPB did not come up on port ${port}; see output.log above." >&2
   clean_up 1
 }
-
-# JupyterLab is optional and starts last (after the session it attaches to), so
-# its port opens well after the control's. If it never does, say so and carry on:
-# the viewer works, and script.sh.erb has already logged why.
-if [[ "${jupyter_enabled:-false}" == "true" ]]; then
-  biopb_wait_port "JupyterLab" "${jupyter_port}" 120 || \
-    echo "WARNING: JupyterLab did not open port ${jupyter_port}; its card link may not work." >&2
-fi
