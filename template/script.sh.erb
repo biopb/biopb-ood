@@ -71,6 +71,31 @@ CACHE_DIR="${SESSION_TMP}/cache"
 export XDG_CACHE_HOME="${SESSION_TMP}/xdg-cache"
 mkdir -p "${CACHE_DIR}" "${XDG_CACHE_HOME}"
 
+# The cache is written constantly, so it belongs on a real local disk. /tmp is
+# usually one but not always: some sites mount it as RAM (the cache then eats the
+# job's memory) or on network storage, and some keep it small. Warn rather than
+# fail -- the session works either way, just slower or until the disk fills.
+# Best effort: a df that cannot answer says nothing.
+cache_want_gb=<%= context.cache_gb.to_s[/\A\d+\z/].to_i %>
+if cache_df="$(df -P -T -k "${CACHE_DIR}" 2>/dev/null | tail -n 1)" && [[ -n "${cache_df}" ]]; then
+  read -r _ cache_fstype _ _ cache_avail_kb _ <<<"${cache_df}"
+  case "${cache_fstype}" in
+    tmpfs|ramfs)
+      echo "WARNING: the cache directory ${CACHE_DIR} is on ${cache_fstype} (RAM), so the cache" >&2
+      echo "         counts against this job's memory. Set TMPDIR to a local disk, if the node has one." >&2 ;;
+    nfs*|lustre|gpfs|beegfs|panfs|ceph|cifs|smb*|fuse*)
+      echo "WARNING: the cache directory ${CACHE_DIR} is on ${cache_fstype}, not a local disk." >&2
+      echo "         The cache is written constantly and will be slow there. Set TMPDIR to a local" >&2
+      echo "         disk, if the node has one." >&2 ;;
+  esac
+  if [[ "${cache_avail_kb}" =~ ^[0-9]+$ ]] \
+      && (( cache_avail_kb < cache_want_gb * 1024 * 1024 )); then
+    echo "WARNING: ${CACHE_DIR} has $(( cache_avail_kb / 1024 / 1024 )) GB free, less than the ${cache_want_gb} GB" >&2
+    echo "         cache size you asked for. The cache will fill the disk before it reaches its" >&2
+    echo "         limit; lower the cache size in the launch form." >&2
+  fi
+fi
+
 # Jupyter's runtime dir holds the session kernel's connection file, whose key is
 # the only thing between another user on this node and that kernel. Node-local
 # and private to this job, rather than the default under NFS home: nothing else
