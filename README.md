@@ -63,7 +63,9 @@ the job also starts an agentless BioPB session with a kernel, then JupyterLab at
   session's MCP address is in `$BIOPB_MCP_URL`; attach the agent to it over HTTP
   (Claude Code: `claude mcp add --transport http biopb-session "$BIOPB_MCP_URL"`)
   so it works in the same kernel. An agent that spawns its own session through
-  the stdio shim gets a second kernel the notebook cannot see.
+  the stdio shim gets a second kernel the notebook cannot see. With a site's
+  JupyterLab module loaded, the terminal gets the job's own `PYTHONPATH`, not
+  the module's, which would break biopb's tools there.
 - **Finding JupyterLab** is the site's business, not this app's: see
   [INSTALL.md](INSTALL.md#4-jupyterlab-and-an-agent-terminal-optional).
 

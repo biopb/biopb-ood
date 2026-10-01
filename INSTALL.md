@@ -184,6 +184,18 @@ that disabled it (`jpserver_extensions`) is not overridden. Setting
 `terminals_enabled = False` in the site's Jupyter config turns terminals off
 regardless.
 
+A module also exports a `PYTHONPATH` of its own Python's packages. Lab and its
+notebook kernels need it, but a terminal inherits it too, and the biopb tools an
+agent runs there (`biopb-mcp`, `biopb`) are a different Python's, which then
+imports the module's compiled packages ahead of its own and dies at import
+(`No module named 'rpds.rpds'`, or a `pyzmq` error). So when a module was loaded
+the app gives Lab's terminals the job's own `PYTHONPATH` and `PYTHONHOME` back
+(`template/terminal-shell.sh`, set as Jupyter's terminal command), and only the
+terminals: Lab and the kernels keep the module's. The cost is that the module's
+own `python3` in a terminal no longer sees the module's packages; `module load`
+it there if you want them. A site that already sets `terminado_settings` in its
+Jupyter config keeps its own terminal command and gets none of this.
+
 The session card also links OnDemand's own shell app for the node
 (`/pun/sys/shell/ssh/<node>`), whether or not JupyterLab is on. That is the
 portal's terminal, so whether it will open a compute node is the site's host
