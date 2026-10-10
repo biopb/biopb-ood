@@ -24,9 +24,12 @@ has the rationale behind specific choices below, if you need it.
 
 ## Requirements
 
-- **biopb 0.15.0 or newer**, with a matching CLI and web bundle from the same
-  release. The portal-origin setting (INSTALL.md) needs 0.15.2; without it
-  everything else works and the agent hands out a path instead of a full link.
+- **biopb 0.16.0 or newer**, with a matching CLI and web bundle from the same
+  release. 0.16 is what lets an agent ask the running session for a kernel
+  instead of starting its own, and what makes a data directory that is not
+  watched open at once rather than after a full walk. The portal-origin setting
+  (INSTALL.md) needs 0.15.2; without it everything else works and the agent
+  hands out a path instead of a full link.
 - **Open OnDemand**, with Slurm and a home directory the compute nodes can see.
 
 See [INSTALL.md](INSTALL.md) for single-user and site-wide setup — everything
@@ -61,16 +64,18 @@ an **Open JupyterLab** button.
 
 - **Notebooks** — pick the kernel *biopb: connect to the running biopb session*.
   It runs in the session's namespace (`client`, `ops`), so it shares its kernel
-  with everything else attached. There is no napari window on a compute node;
+  with everything else attached. **No session is started with the job**: one
+  exists once an agent has attached or you have started one from the dashboard,
+  and until then a notebook says "no running biopb session". With several, the
+  notebook takes the newest. There is no napari window on a compute node;
   look at results in the web viewer. The agent gives you the viewer link for the
   portal, not the node's loopback one, when the site has set the portal's origin
   (`BIOPB_PUBLIC_ORIGIN`, see [INSTALL.md](INSTALL.md#5-review-the-site-settings));
   without it you get the path and open it on the portal you are already on.
 - **A terminal** is a shell on the node, for an AI agent you have installed. The
-  session's MCP address is in `$BIOPB_MCP_URL`. An agent that spawns its own
-  session through the stdio shim gets a second kernel the notebook cannot see;
-  how best to attach one to this session is not settled yet. With a site's
-  JupyterLab module loaded, the terminal gets the job's own `PYTHONPATH`, not
+  agent's stdio shim finds this job's control (`$BIOPB_CONTROL_PORT`) and, when
+  the agent attaches, takes a free session or asks it to launch one, as the agent
+  chooses. That is what creates the session the notebook then shares. With a site's JupyterLab module loaded, the terminal gets the job's own `PYTHONPATH`, not
   the module's, which would break biopb's tools there.
 - **Finding JupyterLab** is the site's business, not this app's: see
   [INSTALL.md](INSTALL.md#4-jupyterlab-and-terminal-optional).
@@ -117,21 +122,22 @@ if you're wondering why that distinction matters.
 2. `script.sh.erb` runs `biopb-control run` and waits for HTTP 200 on
    `/data_plane/readyz` — meaning the data plane is genuinely serving, not
    just that the sidecar answered — for up to 15 minutes.
-3. With JupyterLab on, `script.sh.erb` then asks the control for a session and
-   starts JupyterLab, in that order (see [DESIGN-NOTES.md](DESIGN-NOTES.md)).
+3. With JupyterLab on, `script.sh.erb` then starts JupyterLab. It does not start
+   a biopb session: that waits for an agent or the dashboard to ask for one (see
+   [DESIGN-NOTES.md](DESIGN-NOTES.md)).
 4. The session card shows a Connect button (to the BioPB dashboard) carrying the
    token, an Open JupyterLab button when JupyterLab is on, and an Open Shell
    button. The card goes live once the control is listening; JupyterLab can take
    a little longer.
 
-**Watch the data directory** (on by default) decides whether the session opens
-immediately with the catalog filling in behind it, or waits for a full scan of
-the data directory first:
+Either way the session opens within seconds and the catalog fills in behind it.
+**Watch the data directory** (off by default) decides what happens after the
+first scan:
 
-| | what the first 200 means |
+| | what happens to the data directory |
 |---|---|
-| **Yes** (default) | the session opens in seconds; images appear as they're found |
-| No | nothing answers until the whole directory has been walked; the first 200 carries a complete catalog |
+| **No** (default) | walked once, in the background; files added later are not picked up |
+| Yes | walked again on every pass to find files added or removed; every pass checks every file, so use it for a directory of modest size, not a whole archive |
 
 A cold start on a small dataset is ~8 seconds either way.
 
@@ -153,8 +159,10 @@ The token persists across relaunches in `~/.local/state/biopb-ood/token`
 (mode `600`); rotate it by deleting that file.
 
 So does the catalog's persistent part (ROIs you draw, decode-rate measurements):
-it is `~/.local/state/biopb-ood/catalog.duckdb`, the same file every launch.
-Delete it to start clean. (The list of sources is rebuilt on every start.)
+it is `~/.local/state/biopb-ood/catalog.duckdb`, the same file every launch. It is
+in your home, not on the node's local disk, so it follows you to whichever node
+the next launch lands on. Delete it to start clean. (The list of sources is
+rebuilt on every start.)
 
 ## Remote Arrow Flight
 
