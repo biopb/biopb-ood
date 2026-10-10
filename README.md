@@ -37,10 +37,11 @@ else (Slurm resources, cluster config, install layout) comes with those two.
 The web UI is served through OnDemand's own `/node/<host>/<port>/` proxy, so the
 session card is a **Connect** button and there is no tunnel to run.
 
-This needs **biopb 0.13.0 or newer**, which added `--url-prefix` support; the
-launcher refuses to start without it rather than serving a blank page. Against
-older installs, use this app's [`tunnel`](../../tree/tunnel) branch instead —
-same app, moved over SSH.
+This needs `--url-prefix` support (added in biopb 0.13.0; this app as a whole
+needs 0.15.0, see [Requirements](#requirements)); the launcher refuses to start
+without the flag rather than serving a blank page. Against older installs, use
+this app's [`tunnel`](../../tree/tunnel) branch instead — same app, moved over
+SSH.
 
 ### Security model
 
@@ -72,7 +73,7 @@ an **Open JupyterLab** button.
   JupyterLab module loaded, the terminal gets the job's own `PYTHONPATH`, not
   the module's, which would break biopb's tools there.
 - **Finding JupyterLab** is the site's business, not this app's: see
-  [INSTALL.md](INSTALL.md#4-jupyterlab-and-an-agent-terminal-optional).
+  [INSTALL.md](INSTALL.md#4-jupyterlab-and-terminal-optional).
 
 ### Security
 
@@ -95,8 +96,10 @@ an **Open JupyterLab** button.
 | `manifest.yml` | app name, category, icon |
 | `form.yml.erb` | the launch form (the `.erb` suffix is what gets it rendered) |
 | `submit.yml.erb` | Slurm resources + which vars reach `view.html.erb` |
-| `template/before.sh.erb` | allocates ports + access token on the compute node |
+| `template/before.sh.erb` | one-session-per-user guard; allocates ports + access token, mints the Flight certificate, finds JupyterLab |
 | `template/script.sh.erb` | writes the session config, runs `biopb-control run`, and (optionally) starts the session and JupyterLab |
+| `template/after.sh.erb` | holds the session card back until the control is listening, so its buttons work when it appears |
+| `template/terminal-shell.sh` | the shell a JupyterLab terminal runs, to give it the job's own `PYTHONPATH` back when Lab came from a module |
 | `view.html.erb` | the session card: the Connect, JupyterLab and shell buttons, token, Flight endpoint or tunnel |
 
 `template/` is the part OnDemand stages into the job directory. Scripts placed
@@ -106,7 +109,7 @@ outside it are never staged.
 stays `0644` (sourced, not executed) — see [DESIGN-NOTES.md](DESIGN-NOTES.md)
 if you're wondering why that distinction matters.
 
-## Start-up seqeunce
+## Start-up sequence
 
 1. `before.sh.erb` refuses to start if you already have a session running (see
    [Isolation](#isolation-and-multi-tenancy)), then allocates ports, an access
@@ -216,7 +219,7 @@ With **loopback only**, run the `ssh -L` command from the card and dial
 | Symptom | Cause |
 |---|---|
 | No form at all: "This app requires clusters that do not exist or you do not have access to" | the form file is not named `form.yml.erb`, so its ERB never ran and `cluster` is a literal `<%- … -%>` string. Otherwise: the cluster really is absent from `/etc/ood/config/clusters.d`, or your account is not allowed to submit to it |
-| Page loads blank, console 404s on `/assets/*` | the web bundle predates 0.13.0, or is from a different release than the CLI — the job output warns about this at startup |
+| Page loads blank, console 404s on `/assets/*` | the web bundle is from a different release than the CLI (or predates 0.13.0) — the job output warns about this at startup |
 | Portal returns 503 / "failed to connect" | the control did not bind the node's interfaces; check `BIOPB_CONTROL_HOST` in the job output |
 | Connect button lands on a plain Apache "Not Found" (`Server at … Port 443` in the footer) | the portal never matched the route — see [INSTALL.md](INSTALL.md#5-review-the-site-settings) for node URI / host naming |
 | Every request 404s, but the page itself loaded | the prefix biopb was told does not match what the portal sends |

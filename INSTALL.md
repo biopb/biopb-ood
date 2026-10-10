@@ -46,7 +46,19 @@ curl -sSfL https://biopb.org/install.sh | bash
 
 This is what biopb documents for its users. It fetches the current release
 bundle and sets up `~/.local` — CLI, control plane, tensor server, and the web
-bundle.
+bundle. It also does more than this app needs:
+
+- It installs napari with its extras and Qt, a large desktop stack that a compute
+  node session never uses.
+- It registers biopb-mcp with every AI agent it detects (Claude Code included),
+  **rewriting that agent's configuration**.
+
+If you do not want either, install the release wheels yourself instead, as in
+[B.1](#1-install-biopb-once-shared) but into `~/.local` (for example with
+`uv tool install`). The app needs only `biopb`, `biopb-tensor-server`,
+`biopb-control` and the web bundle. Include the `tls` extra on
+`biopb-tensor-server` if you want remote Arrow Flight; without it the session
+falls back to loopback Flight.
 
 #### Verify
 
@@ -89,6 +101,21 @@ biopb's:
 uv tool install jupyterlab
 ```
 
+Two things the app does to the Lab it finds, so you need not:
+
+- It turns on the web terminal (`jupyter_server_terminals`) when the Lab's merged
+  config does not already name it. A module-installed Jupyter keeps each package
+  in its own prefix, so that extension's config is often not on Jupyter's search
+  path and the Lab would have no Terminal tile. A site that enabled or disabled it
+  on purpose is left alone.
+- With a module, it gives the Lab's terminals the job's own `PYTHONPATH` back
+  (`template/terminal-shell.sh`), because the module's would break biopb's tools
+  in a terminal. A terminal command your site's config already sets is kept.
+
+The session card also has an **Open Shell** button, a link to OnDemand's own shell
+app on the node. Whether that works depends on your portal's host allowlist; many
+sites do not allow compute nodes, in which case `ssh <node>` is the fallback.
+
 See [README.md](README.md#jupyterlab-and-an-agent-terminal) for what it starts.
 
 ---
@@ -96,7 +123,7 @@ See [README.md](README.md#jupyterlab-and-an-agent-terminal) for what it starts.
 ## B. Site-wide or group
 
 Everything above applies, plus the following. **Read
-[the security note in the README](README.md#what-this-costs-and-why-the-tunnel-branch-still-exists)
+[the security model in the README](README.md#security-model)
 before deploying this widely** — it publishes the control plane on the compute
 node, and the access token crosses the portal → node hop in cleartext.
 
@@ -198,7 +225,7 @@ copying a snippet.
 | Login host | derived from the cluster's `v2.login.host` | no edit needed; used only for the Arrow Flight tunnel, and only when the launch form asks for loopback Flight |
 | Arrow Flight access | form field, default remote (`grpcs://` on the node) | flip the default to `"false"` in `form.yml.erb` if your site firewalls compute nodes off from user workstations, or does not want the port published at all. See [Remote Arrow Flight](README.md#remote-arrow-flight) |
 | JupyterLab | form field, default off | needs a JupyterLab the app can find; see [A.4](#4-jupyterlab-and-terminal-optional). Uses the port after Flight (`base+6`), so a firewall that only opens the first three needs that one too |
-| Exclusive node | form field, default off | adds `--exclusive` when JupyterLab is on. **Read the security note in the README before turning JupyterLab on for a shared-node cluster** |
+| Exclusive node | form field, default off | adds `--exclusive` when JupyterLab is on. **Read [the JupyterLab security note](README.md#security) before turning JupyterLab on for a shared-node cluster** |
 | Cache size | form field, default 16 GB | **per session**, on node-local disk. A few concurrent sessions per node will find your real limit; lower it if `/tmp` is small |
 | Cache location | `${TMPDIR:-/tmp}/biopb-ood-<jobid>/cache`, in `template/script.sh.erb` | the job's own directory on the compute node's **local disk**, deleted when the job ends. It is written constantly, so it should not be on NFS or RAM: if `TMPDIR` (or `/tmp`) is `tmpfs`, a network filesystem, or has less free space than the cache size, the job output warns. Point `TMPDIR` at local scratch in the job environment if `/tmp` is a poor fit. Not `$SLURM_TMPDIR` or `$LOCAL_SCRATCH`, which this app does not read |
 
