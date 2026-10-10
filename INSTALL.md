@@ -269,18 +269,8 @@ BIOPB_BIN_DIR=~/src/biopb/.venv/bin
 BIOPB_WEBAPP_DIR=~/src/biopb/web/packages/app/dist
 ```
 
-Put them in `~/.config/biopb-ood/dev.env` (plain `KEY=value` lines; the job
-sources it and says `DEV MODE` in its log). Delete the file to return to the
-`uv tool` install. A running session must be cancelled and relaunched to pick
-the change up.
-
-Build the whole web workspace, as above, not `--filter`: the app imports the
-sibling `tensor-flight-client` package and fails type-checking against its stale
-`dist`. The checkout pins pnpm in `web/package.json`, so
-`npx pnpm@<that version>` works where pnpm is not installed.
-
-Alternatively set the variables in the portal's environment, or edit the two
-defaults at the top of `template/script.sh.erb`.
+Set them in the job environment, or edit the two defaults at the top of
+`template/script.sh.erb`.
 
 ## When it does not work
 
