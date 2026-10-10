@@ -15,28 +15,6 @@ set -euo pipefail
 STAGED_ROOT="${PWD}"
 CONFIG_FILE="${STAGED_ROOT}/biopb.json"
 
-# --- optional per-user dev override ---------------------------------------- #
-#
-# ~/.config/biopb-ood/dev.env, if present, is sourced here to point the app at a
-# build tree instead of the `uv tool` install -- e.g.
-#
-#   BIOPB_BIN_DIR=$HOME/work/biopb/.venv/bin
-#   BIOPB_WEBAPP_DIR=$HOME/work/biopb/web/packages/app/dist
-#
-# A file rather than the portal's environment because a user cannot set that.
-# Remove or rename the file to go back to the installed biopb. Sourced in both
-# before.sh.erb and script.sh.erb, each of which resolves the bin dir itself;
-# sourcing twice is harmless.
-BIOPB_DEV_ENV="${BIOPB_DEV_ENV:-${HOME}/.config/biopb-ood/dev.env}"
-if [[ -r "${BIOPB_DEV_ENV}" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  . "${BIOPB_DEV_ENV}"
-  set +a
-  echo "NOTE: DEV MODE -- ${BIOPB_DEV_ENV} sets BIOPB_BIN_DIR=${BIOPB_BIN_DIR:-<unset>}" \
-       "BIOPB_WEBAPP_DIR=${BIOPB_WEBAPP_DIR:-<unset>}" >&2
-fi
-
 # --- where the install lives ---------------------------------------------- #
 #
 # Resolved from the environment as the *launching user* has it. A site that
