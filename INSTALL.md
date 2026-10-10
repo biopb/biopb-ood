@@ -46,7 +46,19 @@ curl -sSfL https://biopb.org/install.sh | bash
 
 This is what biopb documents for its users. It fetches the current release
 bundle and sets up `~/.local` — CLI, control plane, tensor server, and the web
-bundle.
+bundle. It also does more than this app needs:
+
+- It installs napari with its extras and Qt, a large desktop stack that a compute
+  node session never uses.
+- It registers biopb-mcp with every AI agent it detects (Claude Code included),
+  **rewriting that agent's configuration**.
+
+If you do not want either, install the release wheels yourself instead, as in
+[B.1](#1-install-biopb-once-shared) but into `~/.local` (for example with
+`uv tool install`). The app needs only `biopb`, `biopb-tensor-server`,
+`biopb-control` and the web bundle. Include the `tls` extra on
+`biopb-tensor-server` if you want remote Arrow Flight; without it the session
+falls back to loopback Flight.
 
 #### Verify
 
