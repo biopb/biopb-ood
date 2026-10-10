@@ -17,8 +17,9 @@ rewrites the SPA shell (a `<base href>`, the root-absolute asset URLs, and a
 `window.__BIOPB_BASE__` the app reads instead of a build-time constant) so
 everything resolves back inside the session's namespace.
 
-This needs biopb 0.13.0 or newer (biopb/biopb#731 added `--url-prefix`).
-`script.sh.erb` checks for the flag and refuses to start without it, rather than
+`--url-prefix` arrived in biopb 0.13.0 (biopb/biopb#731); the app as a whole now
+needs 0.15.0 (remote Flight's `--grpc-external-location`), so the flag is always
+present on a supported install. `script.sh.erb` still checks for the flag and refuses to start without it, rather than
 letting the session come up as a blank page. Against 0.12.0 or earlier, use the
 [`tunnel`](../../tree/tunnel) branch instead — same app, moved over SSH.
 
@@ -173,9 +174,9 @@ sat on "Connecting to server…" in the meantime.
 
 0.13.0 makes `/readyz` connect, answer from that health alone, and return **503
 until Flight says `SERVING`** — so a 200 means a data plane that is genuinely
-there, rather than a sidecar that merely answered. Since 0.13.0 is this app's
-floor, that is the behaviour you get; the paragraph above is only here to explain
-what an older install did.
+there, rather than a sidecar that merely answered. Since this app requires
+0.15.0, that is the behaviour you get; the paragraph above is only here to
+explain what an older install did.
 
 `SERVING` is not a promise of a complete catalog. Under progressive discovery
 (biopb/biopb#212) the server reaches `SERVING` immediately and populates behind
@@ -342,8 +343,9 @@ the proxy variant needed `--url-prefix` (biopb/biopb#731), which was unreleased
 at the time. Once biopb 0.13.0 shipped that flag, `main` merged `dev` in
 wholesale (every conflict resolved in dev's favor) and became the proxy variant
 too; the SSH-tunnel deployment moved to its own `tunnel` branch instead of
-staying on `main`. As of 2026-09-25, `main` has not been touched since that
-merge — `dev` is ahead by whatever has landed since (one-server-per-user, token
-persistence, Flight TLS, and this file's own predecessor cleanups) — and a merge
-from `dev` back into `main` is a clean, conflict-free fast-forward-equivalent
-whenever someone wants to cut it.
+staying on `main`.
+
+Since then work has landed on `main` directly, through pull requests. As of
+2026-10-10 the `dev` branch is entirely contained in `main` (24 commits behind,
+none ahead) and is a leftover, not a variant; `tunnel` is the only branch that is
+a different deployment.
