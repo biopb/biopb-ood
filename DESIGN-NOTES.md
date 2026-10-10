@@ -182,16 +182,21 @@ explain what an older install did.
 (biopb/biopb#212) the server reaches `SERVING` immediately and populates behind
 you, carrying freshness in `full_scan_in_progress` and
 `last_full_scan_finished_at`; a client needing a complete catalog waits on those
-fields, not on `SERVING`. Which behaviour you get is decided by "Watch the data
-directory" on the launch form — Yes (default) reaches `SERVING` immediately with
-the catalog filling in behind it; No walks the whole tree before binding
-anything, so the first 200 does carry a complete catalog, at the cost of a
-launch that can take minutes on a large tree.
+fields, not on `SERVING`.
 
-`script.sh.erb` allows 15 minutes and logs a line a minute with the last status.
-Timing out is not fatal — a very large tree can outlast the wait, and the
-session is usable the moment it finishes. A cold start on a small dataset is ~8
-seconds either way.
+**Before biopb 0.16 the launch form decided which you got.** "Watch the data
+directory" on reached `SERVING` immediately with the catalog filling in behind
+it; off walked the whole tree before binding anything, so the first 200 carried a
+complete catalog at the cost of a launch that could take minutes on a large tree.
+From 0.16 a directory that is not watched (`monitor` false, a "scan-once" root) is
+registered progressively too, so both settings bind at once and the field only
+decides whether the directory is walked again afterwards. A watched directory
+re-stats every file under it on every pass, which is why it is no longer the
+default: upstream says to watch directories "of a sane size, not a whole archive".
+
+`script.sh.erb` still allows 15 minutes, from the days of the long walk, and logs
+a line a minute with the last status. Timing out is not fatal. A cold start on a
+small dataset is ~8 seconds either way.
 
 ## Why state moved from per-session to per-user (`2b18dba`)
 
@@ -292,20 +297,25 @@ ProxyJump tunnel.
 Why it is built the way it is (`before.sh.erb` for whether, `script.sh.erb` for
 how).
 
-**One kernel, attached to by everyone.** The job asks the control for an
-agentless session (`POST /api/sessions/new`) rather than letting an agent's
-stdio shim spawn one. The shim's session is private to that agent and would be
-a second kernel with its own namespace, unseen by the notebook. The notebook
-reaches the session through the `biopb-session` kernel spec, a proxy that
-forwards every message to it; the agent attaches to the session's `/mcp` over
-HTTP, the transport the shim itself recommends. `BIOPB_MCP_URL` carries the
-address, read from the registry record because the launch reply names the
-session but not its endpoint.
+**One kernel, attached to by everyone, started on demand.** The job used to ask
+the control for an agentless session at launch (`POST /api/sessions/new`), because
+an agent's stdio shim spawned a session of its own: private to that agent, a
+second kernel with its own namespace, unseen by the notebook. Since biopb 0.16 the
+shim starts unbound and, when the agent calls `attach`, takes a free session or
+asks the control to launch one, as the agent chooses (`auto` is the newest free
+session, else a new one). So the job starts none —
+an unused kernel would sit in memory for the whole job — and the session exists
+once an agent attaches or the dashboard starts one. The notebook reaches it
+through the `biopb-session` kernel spec, a proxy that forwards every message to
+the newest live session, and says "no running biopb session" until one exists. The
+shim finds this job's control, rather than starting a second, through
+`BIOPB_CONTROL_PORT`, which the job exports. `BIOPB_MCP_URL` is gone with the
+launch-time session: there is no address to hand out until a session exists, and
+the shim resolves it itself.
 
-**Session first, then Lab.** A terminal inherits Lab's environment, so the
-session's address has to exist before Lab starts. A failed session still leaves
-Lab up (a notebook then says "no running biopb session"), and a Lab that never
-comes up leaves the viewer alone.
+**Lab does not wait for a session.** It used to start after one, so a terminal
+inherited the session's address. With nothing to inherit, Lab starts as soon as the
+data plane is ready, and a Lab that never comes up leaves the viewer alone.
 
 **A private, node-local runtime dir.** `JUPYTER_RUNTIME_DIR` is set to a `0700`
 directory under the job's temp dir, before the control starts, so the session,

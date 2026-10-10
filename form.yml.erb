@@ -109,14 +109,16 @@ attributes:
   monitor_sources:
     label: "Watch the data directory for changes"
     widget: "select"
-    value: "true"
+    value: "false"
     options:
-      - ["Yes — open now, index in the background (recommended)", "true"]
-      - ["No  — index everything before opening", "false"]
+      - ["No  — index once, in the background (recommended)", "false"]
+      - ["Yes — keep watching for new files", "true"]
     help: |
-      Yes: the session opens in seconds and images appear as they are found,
-      including files added later. Watching polls the filesystem.
-      No: the session opens only after the whole directory has been indexed.
+      Either way the session opens in seconds and images appear as they are found.
+      No: the directory is indexed once; files added later are not picked up.
+      Yes: the directory is scanned again and again to find files added or
+      removed while the session runs. Every pass checks every file under it, so
+      use it for a directory of modest size, not a whole archive.
 
   flight_remote:
     label: "Arrow Flight access"

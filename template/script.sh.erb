@@ -199,7 +199,9 @@ fi
 # config lives in the per-launch session directory, so every launch would open a
 # new catalog and lose the last one's ROIs. Next to the token, which has the same
 # lifetime: the user's, across launches. DuckDB holds an exclusive lock on it, so
-# the one-session guard in before.sh.erb is what keeps two sessions off it.
+# the one-session guard in before.sh.erb is what keeps two sessions off it. It is
+# deliberately under $HOME and not SESSION_TMP: that is node-local and deleted when
+# the job ends, which would throw the catalog away with it.
 # before.sh.erb computes the same directory but does not export it.
 CATALOG_FILE="${BIOPB_OOD_STATE_DIR:-${HOME}/.local/state/biopb-ood}/catalog.duckdb"
 mkdir -p "$(dirname "${CATALOG_FILE}")"
@@ -354,19 +356,17 @@ CONTROL_PID=$!
 # last_full_scan_finished_at; a client that needs the whole catalog waits on
 # those, not on SERVING.
 #
-# What decides which one you get here is this app's own form. "Watch the data
-# directory" defaults to Yes, which monitors the directory: the server binds and
-# reaches SERVING at once, and the catalog fills behind it — so this gate
-# normally clears in seconds and the UI opens on a catalog still growing. Set it
-# to No and the sources become static, which the launch path registers *before*
-# it binds anything: nothing answers at all until the walk finishes, and the
-# first 200 then does come with a complete catalog.
+# Both settings of this app's "Watch the data directory" field now behave the same
+# way here: the server binds and reaches SERVING at once and the catalog fills
+# behind it, so this gate normally clears in seconds and the UI opens on a catalog
+# still growing. The field only decides what happens after that scan -- No
+# (`monitor` false, the default) walks the directory once; Yes walks it again every
+# pass to pick up new files. Before biopb 0.16 a "No" directory was walked
+# *before* anything bound, and nothing answered until it finished.
 #
-# The budget below is sized for that second case, where the walk is minutes on a
-# large tree and nothing is listening throughout. Timing out is not fatal — the
-# session stays up.
-echo "Waiting for the data plane (seconds while watching the directory; up to 15"
-echo "minutes if you chose to index everything before opening)"
+# The 15-minute budget dates from that case and is kept as a generous ceiling.
+# Timing out is not fatal — the session stays up.
+echo "Waiting for the data plane (normally seconds; up to 15 minutes)"
 READY=0
 for attempt in $(seq 1 450); do
   if ! kill -0 "${CONTROL_PID}" 2>/dev/null; then
@@ -409,70 +409,33 @@ if [[ "${READY}" == "1" ]]; then
   fi
 else
   echo "WARNING: the data plane did not report ready within 15 minutes." >&2
-  echo "         The session is left up anyway — on a large data directory the" >&2
-  echo "         initial scan can simply take longer than the wait, and the UI" >&2
-  echo "         becomes usable as soon as it finishes. Check the log above, and" >&2
-  echo "         /data_plane/readyz for a backend_error." >&2
+  echo "         The session is left up anyway and may still come ready. Check the" >&2
+  echo "         log above, and /data_plane/readyz for a backend_error." >&2
 fi
 
-# --- JupyterLab and the session it works in --------------------------------- #
+# --- JupyterLab -------------------------------------------------------------- #
 #
 # Only when the form asked for it and before.sh.erb found a JupyterLab.
 #
-# Two things start here, in this order, and the order is the point.
+# No biopb session is started here. A session is a kernel process that holds
+# memory for as long as it lives, and nothing needs one until somebody asks:
 #
-# 1. A session: an agentless biopb session with a kernel, asked of the control
-#    (POST /api/sessions/new). It has no napari window -- nothing on a compute
-#    node has a display -- so results are looked at in the web viewer. It is the
-#    one kernel that a notebook (through the `biopb-session` kernel spec) and an
-#    agent (over http, below) both work in. An agent that spawned its own session
-#    through the stdio shim would get a second kernel with a different namespace,
-#    and the notebook would not see what it did.
+#   - An agent's stdio shim starts unbound and asks the control for a session when
+#     the agent attaches, launching one if none is free. BIOPB_CONTROL_PORT,
+#     exported above, is how it finds *this* control instead of starting its own.
+#   - The dashboard can start one too.
+#   - A notebook's `biopb-session` kernel spec attaches to whichever session is
+#     live (the newest connection file in JUPYTER_RUNTIME_DIR), so a notebook
+#     opened before any session exists answers "no running biopb session" until
+#     an agent or the dashboard has made one.
 #
-# 2. JupyterLab, started *after* the session so that the session's address is
-#    already in the environment it inherits, and a terminal opened in Lab has
-#    BIOPB_MCP_URL to hand to an agent.
+# Starting one here as well would leave an unused kernel running for the whole
+# job and, before 0.16, was the only way to give the notebook and an agent the
+# same namespace; the shim now attaches to an existing session instead of
+# spawning its own.
 #
-# Neither is fatal to the other, or to the viewer: a failed session leaves Lab up
-# (a notebook then answers "no running biopb session" until one exists), and a
-# Lab that never comes up leaves the viewer as it was.
+# A Lab that never comes up leaves the viewer as it was.
 if [[ "${jupyter_enabled:-false}" == "true" ]]; then
-  # The wait is bounded below the curl timeout so a slow cold start comes back as
-  # "starting" from the control rather than as a curl error with a session still
-  # coming up behind it.
-  session_json="$(curl -s -m 175 -X POST \
-      -H "Authorization: Bearer ${biopb_token}" \
-      "http://127.0.0.1:${control_port}/api/sessions/new?client_timeout=170" 2>/dev/null || true)"
-  read -r session_state session_id < <(python3 -c '
-import json, sys
-try:
-    d = json.loads(sys.argv[1])
-except Exception:
-    d = {}
-print(d.get("state") or "failed", d.get("session_id") or "-")
-' "${session_json}")
-
-  export BIOPB_MCP_URL=""
-  if [[ "${session_state}" == "started" ]]; then
-    # The control's reply names the session but not its /mcp address; that is in
-    # the registry record the session published (biopb._sessions).
-    BIOPB_MCP_URL="$(python3 -c '
-import json, sys
-try:
-    print(json.load(open(sys.argv[1])).get("mcp_url") or "")
-except Exception:
-    print("")
-' "${BIOPB_SESSIONS_DIR:-${BIOPB_STATE}/sessions}/${session_id}.json")"
-  fi
-
-  if [[ -n "${BIOPB_MCP_URL}" ]]; then
-    echo "BioPB session ${session_id} is up; agent MCP endpoint ${BIOPB_MCP_URL}"
-  else
-    echo "WARNING: could not start a BioPB session for JupyterLab (${session_state})." >&2
-    echo "         Notebooks will report \"no running biopb session\". Look in the" >&2
-    echo "         viewer logs under ${BIOPB_STATE}/mcp/viewers/ for the reason." >&2
-  fi
-
   # An array so an empty extra is no argument at all. The origin pattern is an
   # escape hatch for a portal whose proxy does not preserve the Host header, which
   # Jupyter's websocket origin check compares against; without one Lab loads but
