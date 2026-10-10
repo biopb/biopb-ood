@@ -149,6 +149,10 @@ sidecar and Flight ports even though those are loopback-bound).
 The token persists across relaunches in `~/.local/state/biopb-ood/token`
 (mode `600`); rotate it by deleting that file.
 
+So does the catalog's persistent part (ROIs you draw, decode-rate measurements):
+it is `~/.local/state/biopb-ood/catalog.duckdb`, the same file every launch.
+Delete it to start clean. (The list of sources is rebuilt on every start.)
+
 ## Remote Arrow Flight
 
 The **Arrow Flight access** form field controls whether the gRPC data plane
