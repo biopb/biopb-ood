@@ -130,16 +130,30 @@ if you're wondering why that distinction matters.
    button. The card goes live once the control is listening; JupyterLab can take
    a little longer.
 
-Either way the session opens within seconds and the catalog fills in behind it.
-**Watch the data directory** (off by default) decides what happens after the
-first scan:
+The session opens within seconds and the catalog fills in behind it, whatever the
+data sources are.
 
-| | what happens to the data directory |
+## Data sources and cache: your `biopb.json`
+
+The launch form does not ask for a data directory, cache size or watch setting.
+The session serves `~/.config/biopb/biopb.json` (`$BIOPB_CONFIG_HOME/biopb.json`
+if you set it), the file biopb reads by default, and the **admin page** in the
+dashboard edits that same file. Add sources there, then use **Restart** (or
+**Start**) to apply. What you save persists across launches. If the file does not
+exist, the first launch writes an empty one.
+
+Per source, `monitor` decides what happens after the first scan:
+
+| | what happens to the directory |
 |---|---|
-| **No** (default) | walked once, in the background; files added later are not picked up |
-| Yes | walked again on every pass to find files added or removed; every pass checks every file, so use it for a directory of modest size, not a whole archive |
+| `false` (default) | walked once, in the background; files added later are not picked up |
+| `true` | walked again on every pass to find files added or removed; every pass checks every file, so use it for a directory of modest size, not a whole archive |
 
-A cold start on a small dataset is ~8 seconds either way.
+The ports and bind address are set by the launcher, not by the file: a
+`server.host` or `server.port` saved in the admin page is ignored, so the
+session card's address stays correct. The disk cache defaults to
+`${TMPDIR:-/tmp}/biopb-cache-<uid>` on the node's local disk; set
+`cache.file_cache_dir` and `cache.file_max_total_gb` in the file to change it.
 
 ## Isolation and multi-tenancy
 
@@ -159,10 +173,12 @@ The token persists across relaunches in `~/.local/state/biopb-ood/token`
 (mode `600`); rotate it by deleting that file.
 
 So does the catalog's persistent part (ROIs you draw, decode-rate measurements):
-it is `~/.local/state/biopb-ood/catalog.duckdb`, the same file every launch. It is
+biopb names it after the config file's path, which is the same every launch, so
+the same file under `~/.local/state/biopb/catalogs/` is reopened each time. It is
 in your home, not on the node's local disk, so it follows you to whichever node
 the next launch lands on. Delete it to start clean. (The list of sources is
-rebuilt on every start.)
+rebuilt on every start.) A catalog from an earlier version of this app, at
+`~/.local/state/biopb-ood/catalog.duckdb`, is no longer read.
 
 ## Remote Arrow Flight
 

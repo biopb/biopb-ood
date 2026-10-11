@@ -76,8 +76,8 @@ git clone https://github.com/biopb/biopb-ood.git \
 
 ### 3. Launch
 
-In the portal: **Develop → My Sandbox Apps (Development)**, then *BioPB*. Pick a
-data directory and submit.
+In the portal: **Develop → My Sandbox Apps (Development)**, then *BioPB*. Submit
+the form.
 
 The session card shows a **Connect** button (to the BioPB dashboard). If it does not come
 ready, read the job output: every failure this app can anticipate is named there
@@ -218,16 +218,14 @@ copying a snippet.
 | Node URI | `template/before.sh.erb` builds `/node/$host/$port` | must match the portal's `node_uri`; a mismatch 404s every request rather than failing visibly |
 | Portal origin | `BIOPB_PUBLIC_ORIGIN`, in the portal's environment (`pun_custom_env` in `nginx_stage.yml`) or the job's | your portal's `https://host[:port]`, as a browser addresses it. **Optional but worth setting**: it is what lets an agent in the session's terminal hand the user a viewer link that opens, instead of a path on "the portal you opened". Needs **biopb 0.15.2 or newer** (the first release with `--public-origin`, biopb/biopb#1195); an older one ignores it. A malformed value is dropped with a warning in the job log, not a failed session |
 | Node name form | `template/before.sh.erb`, the `hostname -f` block | the prefix must use the name the portal's `host_regex` accepts. Qualified is the common case and the default here; a site whose regex wants short names should delete the block. Wrong form = Apache 404, nothing reaches the node |
-| Data directory root | `form.yml.erb`, `directory:` | **widen this for group shares** — as shipped, users can browse only their own home |
-| Data directory default | `form.yml.erb`, `biopb_data_dir` in the ERB preamble | `~/data` when the user has one, else their home. Point it at your site's convention (a group share, `/scratch/$USER`) — home is the safe answer, not a good one, since the scan then walks everything under it |
 | QOS | form field, default `general` | change the default, or clear it to submit with no `--qos` |
 | Cluster | derived from `OodAppkit.clusters` | no edit needed |
 | Login host | derived from the cluster's `v2.login.host` | no edit needed; used only for the Arrow Flight tunnel, and only when the launch form asks for loopback Flight |
 | Arrow Flight access | form field, default remote (`grpcs://` on the node) | flip the default to `"false"` in `form.yml.erb` if your site firewalls compute nodes off from user workstations, or does not want the port published at all. See [Remote Arrow Flight](README.md#remote-arrow-flight) |
 | JupyterLab | form field, default off | needs a JupyterLab the app can find; see [A.4](#4-jupyterlab-and-terminal-optional). Uses the port after Flight (`base+6`), so a firewall that only opens the first three needs that one too |
 | Exclusive node | form field, default off | adds `--exclusive` when JupyterLab is on. **Read [the JupyterLab security note](README.md#security) before turning JupyterLab on for a shared-node cluster** |
-| Cache size | form field, default 16 GB | **per session**, on node-local disk. A few concurrent sessions per node will find your real limit; lower it if `/tmp` is small |
-| Cache location | `${TMPDIR:-/tmp}/biopb-ood-<jobid>/cache`, in `template/script.sh.erb` | the job's own directory on the compute node's **local disk**, deleted when the job ends. It is written constantly, so it should not be on NFS or RAM: if `TMPDIR` (or `/tmp`) is `tmpfs`, a network filesystem, or has less free space than the cache size, the job output warns. Point `TMPDIR` at local scratch in the job environment if `/tmp` is a poor fit. Not `$SLURM_TMPDIR` or `$LOCAL_SCRATCH`, which this app does not read |
+| Data sources, cache size | the user's `~/.config/biopb/biopb.json` | **not an app setting.** The launch form has no data-directory, cache-size or watch field: the session serves each user's own `biopb.json`, edited in the dashboard's admin page. To give every new user a starting point (a shared sources list, a bigger cache), put a `biopb.json` in their home before the first launch; an account without one gets an empty one |
+| Cache location | biopb's default, `${TMPDIR:-/tmp}/biopb-cache-<uid>` | the compute node's **local disk**. It is written constantly, so it should not be on NFS or RAM: if `TMPDIR` (or `/tmp`) is `tmpfs` or a network filesystem, the job output warns. Point `TMPDIR` at local scratch in the job environment if `/tmp` is a poor fit. A `cache.file_cache_dir` in the user's `biopb.json` overrides it and is not checked. Not `$SLURM_TMPDIR` or `$LOCAL_SCRATCH`, which this app does not read |
 
 ---
 

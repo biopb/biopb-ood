@@ -184,15 +184,32 @@ you, carrying freshness in `full_scan_in_progress` and
 `last_full_scan_finished_at`; a client needing a complete catalog waits on those
 fields, not on `SERVING`.
 
-**Before biopb 0.16 the launch form decided which you got.** "Watch the data
-directory" on reached `SERVING` immediately with the catalog filling in behind
-it; off walked the whole tree before binding anything, so the first 200 carried a
-complete catalog at the cost of a launch that could take minutes on a large tree.
-From 0.16 a directory that is not watched (`monitor` false, a "scan-once" root) is
-registered progressively too, so both settings bind at once and the field only
-decides whether the directory is walked again afterwards. A watched directory
-re-stats every file under it on every pass, which is why it is no longer the
-default: upstream says to watch directories "of a sane size, not a whole archive".
+**Before biopb 0.16 the `monitor` setting decided which you got.** On reached
+`SERVING` immediately with the catalog filling in behind it; off walked the whole
+tree before binding anything, so the first 200 carried a complete catalog at the
+cost of a launch that could take minutes on a large tree. From 0.16 a directory
+that is not watched (`monitor` false, a "scan-once" root) is registered
+progressively too, so both settings bind at once and the setting only decides
+whether the directory is walked again afterwards. A watched directory re-stats
+every file under it on every pass, which is why it is not the default: upstream
+says to watch directories "of a sane size, not a whole archive".
+
+**The launch form no longer writes the config.** It used to generate a
+`biopb.json` in the job's staged directory on every launch, from three form fields
+(data directory, cache size, watch). The admin page's `PUT /api/config` writes the
+file the data plane was started with, so anything saved there was lost on the next
+launch, and the two could not both be the source of truth. The launcher now passes
+`--config ~/.config/biopb/biopb.json`, the file biopb reads by default, and the
+admin page edits it; the three fields are gone. Two things follow.
+
+- *The ports cannot drift.* The control builds the data plane's `--host` and
+  `--port` from its own arguments on every spawn, and the flags win over
+  `server.host`/`server.port` in the file. Checked against a running control:
+  restart, stop and restart-from-stopped, including after a save that changed
+  both keys, all kept the same gRPC port. The session card's address stays right.
+- *The catalog needs no setting.* biopb names the persistent catalog by a digest
+  of the config path; that path is now stable, so the old fixed `store_path` is
+  redundant and was removed.
 
 `script.sh.erb` still allows 15 minutes, from the days of the long walk, and logs
 a line a minute with the last status. Timing out is not fatal. A cold start on a
@@ -230,7 +247,7 @@ back from biopb's own `~/.local/state/biopb/tensor-server.token` — biopb write
 that file on serve and *removes* it on a clean stop, so reading it back would
 hand out a fresh token after every tidy shutdown.
 
-What this gives up is two concurrent sessions with different data directories or
+What this gives up is two concurrent sessions with different data sources or
 different resource shapes. For a single-user session that is a thin use case, and it
 buys away the whole class of shared-state problems above.
 

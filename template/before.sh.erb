@@ -513,5 +513,5 @@ fi
 # form, which is why bare `<%%= qos %>` is right there and wrong here. (And that
 # escape is why this comment does not blow up: ERB reads comments too.)
 export login_host="<%= context.login_host %>"
-export data_dir="<%= context.user_data_dir %>"
+export config_file="${BIOPB_CONFIG_HOME:-${HOME}/.config/biopb}/biopb.json"
 export ood_user="${USER:-$(id -un)}"
