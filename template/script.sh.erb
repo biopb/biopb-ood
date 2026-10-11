@@ -525,14 +525,44 @@ if [[ "${jupyter_enabled:-false}" == "true" ]]; then
       lab_extra+=("--ServerApp.terminado_settings={'shell_command': ['/bin/bash', '${STAGED_ROOT}/terminal-shell.sh']}")
     fi
 
-    exec "${jupyter_bin}" --no-browser \
-      --ServerApp.ip=0.0.0.0 \
-      --ServerApp.port="${jupyter_port}" --ServerApp.port_retries=0 \
-      --ServerApp.base_url="${jupyter_prefix}" \
-      --ServerApp.allow_remote_access=True \
-      --ServerApp.root_dir="${HOME}" \
-      --MultiKernelManager.default_kernel_name=biopb-session \
-      "${lab_extra[@]}"
+    # Kept running for as long as the session is. The control, the data plane and
+    # the biopb session last days, but a site's Jupyter config can shut the Lab
+    # down on its own ("No kernels for N seconds; shutting down" -- an Ansible-managed
+    # /etc/jupyter/jupyter_server_config.py does, after 2 h), and nothing else would
+    # bring it back: the card's link would point at a dead port for the rest of the
+    # job. Relaunching on the same port, prefix and token keeps that link valid; the
+    # user reloads the tab. Nothing is lost by it -- a notebook's kernel only relays
+    # to the session, which is the control's and does not restart with the Lab.
+    #
+    # Not `exec`: this subshell is LAB_PID and has to outlive each Lab, and cleanup
+    # signals it, not the Lab. The TERM trap passes the signal on, or the Lab would
+    # be left running after the job's script exits.
+    lab_child=""
+    trap 'if [[ -n "${lab_child}" ]]; then kill "${lab_child}" 2>/dev/null || true; fi; exit 0' TERM INT
+    lab_quick_exits=0
+    while :; do
+      lab_started=${SECONDS}
+      "${jupyter_bin}" --no-browser \
+        --ServerApp.ip=0.0.0.0 \
+        --ServerApp.port="${jupyter_port}" --ServerApp.port_retries=0 \
+        --ServerApp.base_url="${jupyter_prefix}" \
+        --ServerApp.allow_remote_access=True \
+        --ServerApp.root_dir="${HOME}" \
+        --MultiKernelManager.default_kernel_name=biopb-session \
+        "${lab_extra[@]}" &
+      lab_child=$!
+      wait "${lab_child}" || true
+      lab_child=""
+      # A Lab that dies at once (a bad option, the port taken) would otherwise be
+      # relaunched forever; after three in a row it is not going to start.
+      if (( SECONDS - lab_started < 30 )); then lab_quick_exits=$(( lab_quick_exits + 1 )); else lab_quick_exits=0; fi
+      if (( lab_quick_exits >= 3 )); then
+        echo "--- JupyterLab exited three times within 30 s of starting; not restarting it."
+        exit 1
+      fi
+      echo "--- JupyterLab exited after $(( SECONDS - lab_started )) s; starting it again in 2 s ($(date '+%F %T'))"
+      sleep 2
+    done
   ) > "${STAGED_ROOT}/jupyter.log" 2>&1 &
   LAB_PID=$!
 

@@ -390,3 +390,17 @@ Since then work has landed on `main` directly, through pull requests. As of
 2026-10-10 the `dev` branch is entirely contained in `main` (24 commits behind,
 none ahead) and is a leftover, not a variant; `tunnel` is the only branch that is
 a different deployment.
+
+## JupyterLab is relaunched when it exits
+
+`script.sh.erb` runs JupyterLab in a loop, so it comes back on the same port, base
+URL and token if it exits. The control, data plane and biopb session last as long
+as the job (days), but a site's Jupyter config can shut the Lab down by itself: an
+Ansible-managed `/etc/jupyter/jupyter_server_config.py` here culls idle kernels and
+stops the server after two hours without activity ("No kernels for N seconds;
+shutting down", seen in a past job's `jupyter.log`). Without the loop the card's
+link would point at a dead port for the rest of the job. After a restart the user
+reloads the tab; nothing is lost, because a notebook's kernel only relays to the
+session, which belongs to the control. Three exits within 30 s of starting in a row
+stop the loop (a bad option, the port taken); the reason is in `jupyter.log`. This
+works around the site's idle policy rather than changing it.
