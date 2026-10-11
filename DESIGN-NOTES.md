@@ -211,6 +211,20 @@ admin page edits it; the three fields are gone. Two things follow.
   of the config path; that path is now stable, so the old fixed `store_path` is
   redundant and was removed.
 
+**A biopb started outside OnDemand blocks the launch, and the one-session guard
+cannot see it.** The guard counts the user's `biopb-ood` Slurm jobs. Everything
+else that opens the same `biopb.json` (the installer's control, `biopb control
+start`, an agent session) opens the same catalog, and DuckDB allows one holder
+across NFS, so the data plane exits at the catalog step while the control stays
+up. The control's record (`control.json`) has no node name, and the launching
+control overwrites it anyway, so the holder cannot be located from disk.
+`script.sh.erb` therefore reads this launch's slice of the data-plane log in the
+readiness gate (it records the log's size before starting) and, on a catalog or
+cache lock failure, says what is locked, lists the user's other Slurm jobs as
+likely hosts, and exits instead of leaving a card pointing at a dead data plane.
+The cache lock is the same-node case: the default cache directory is node-local,
+so it only collides with a biopb on the same node, and is hit before the catalog.
+
 `script.sh.erb` still allows 15 minutes, from the days of the long walk, and logs
 a line a minute with the last status. Timing out is not fatal. A cold start on a
 small dataset is ~8 seconds either way.

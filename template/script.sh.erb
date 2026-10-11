@@ -296,6 +296,11 @@ fi
 # loopback default when flight_remote is false, so passing it is a no-op in
 # that case. Passed unconditionally, gated only by the biopb version this app
 # is paired with (see INSTALL.md), not by a runtime capability probe.
+# Where the data plane's log ends right now, so the readiness gate below reads only
+# what this launch wrote. The file is shared with every earlier launch.
+SERVER_LOG="${BIOPB_STATE}/logs/tensor-server.log"
+SERVER_LOG_START="$(stat -c %s "${SERVER_LOG}" 2>/dev/null || echo 0)"
+
 biopb-control run \
   --config "${CONFIG_FILE}" \
   --static-dir "${WEBAPP_DIR}" \
@@ -347,6 +352,55 @@ CONTROL_PID=$!
 #
 # The 15-minute budget dates from that case and is kept as a generous ceiling.
 # Timing out is not fatal — the session stays up.
+# The one startup failure that is the user's to fix and looks like a hang from the
+# portal: another process already holds the persistent catalog. biopb opens it
+# exclusively, and the file is in NFS home, so the holder can be on ANY node -- a
+# control the installer started, `biopb control start`, or an agent session. The
+# data plane logs it and exits, the control stays up, and without this the session
+# card goes live on a UI with no data plane behind it.
+#
+# Nothing on disk says which node. control.json has a port and a pid but no node,
+# and it is no help here anyway: this launch's own control has just overwritten it.
+# So the hint is the user's other Slurm jobs, which is where an interactive biopb
+# is usually running; a login node, which Slurm does not list, is the other likely
+# place.
+catalog_lock_failure () {
+  local new_log
+  [[ -r "${SERVER_LOG}" ]] || return 1
+  if [[ "$(stat -c %s "${SERVER_LOG}" 2>/dev/null || echo 0)" -ge "${SERVER_LOG_START}" ]]; then
+    new_log="$(tail -c "+$(( SERVER_LOG_START + 1 ))" "${SERVER_LOG}" 2>/dev/null || true)"
+  else
+    new_log="$(cat "${SERVER_LOG}" 2>/dev/null || true)"   # rotated since the snapshot
+  fi
+  # Two locks, same cause. The catalog is in NFS home, so its holder can be on any
+  # node. The default cache directory is node-local, so its lock only collides with
+  # a biopb on THIS node, and is hit first when there is one.
+  local what
+  if grep -q 'Could not set lock on file\|Could not open the catalog' <<<"${new_log}"; then
+    what="catalog : $(grep -o '/[^" ]*\.duckdb' <<<"${new_log}" | head -n 1)"
+  elif grep -q 'Cannot acquire cache lock' <<<"${new_log}"; then
+    what="cache   : $(grep -o '/[^ ]*/lock' <<<"${new_log}" | head -n 1)  (so it is on THIS node)"
+  else
+    return 1
+  fi
+  {
+    echo "ERROR: another biopb process is already running from this account, so the data"
+    echo "       plane cannot start."
+    echo "         ${what}"
+    echo "         config  : ${CONFIG_FILE}"
+    echo "       The catalog is named after the config file, so any biopb run from that same"
+    echo "       config -- the one the biopb installer starts, \`biopb control start\`, or an"
+    echo "       agent session -- opens the same one, and only one process can. It may be on"
+    echo "       another node: the file is in your home directory."
+    echo "       Find it and stop it, then relaunch:"
+    echo "         - on the node where it runs:  biopb control stop     (\`biopb control status\` shows it)"
+    echo "         - your other Slurm jobs, any of which could be hosting it:"
+    squeue -h -u "${USER}" -o '           %i  %j  on %N' 2>/dev/null | awk -v me="${SLURM_JOB_ID:-0}" '$1 != me' || true
+    echo "         - a login node is not in that list; check it too."
+  } >&2
+  return 0
+}
+
 echo "Waiting for the data plane (normally seconds; up to 15 minutes)"
 READY=0
 for attempt in $(seq 1 450); do
@@ -361,6 +415,11 @@ for attempt in $(seq 1 450); do
   if [[ "${code}" == "200" ]]; then
     READY=1
     break
+  fi
+  if catalog_lock_failure; then
+    kill "${CONTROL_PID}" 2>/dev/null || true
+    wait "${CONTROL_PID}" 2>/dev/null || true
+    exit 1
   fi
   # A line a minute rather than 450 dots, and it names the last status: 503 is
   # "still scanning", anything else (000, 502) is "the sidecar is not answering
