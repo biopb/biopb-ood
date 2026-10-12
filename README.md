@@ -30,6 +30,11 @@ has the rationale behind specific choices below, if you need it.
   watched open at once rather than after a full walk. The portal-origin setting
   (INSTALL.md) needs 0.15.2; without it everything else works and the agent
   hands out a path instead of a full link.
+- **The dashboard's chat pane** (optional) needs a biopb build after 0.16.0 that
+  carries biopb/biopb#1388. Earlier builds hide it on this app, because they proxy
+  chat only from a loopback-bound control. See
+  [DESIGN-NOTES.md](DESIGN-NOTES.md#the-control-runs-in-token-mode-chat-and-mcp-ride-the-one-token)
+  for what it exposes.
 - **Open OnDemand**, with Slurm and a home directory the compute nodes can see.
 
 See [INSTALL.md](INSTALL.md) for single-user and site-wide setup — everything

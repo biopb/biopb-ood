@@ -404,3 +404,26 @@ reloads the tab; nothing is lost, because a notebook's kernel only relays to the
 session, which belongs to the control. Three exits within 30 s of starting in a row
 stop the loop (a bad option, the port taken); the reason is in `jupyter.log`. This
 works around the site's idle policy rather than changing it.
+\n
+## The control runs in `token` mode: chat and `/mcp` ride the one token
+
+From the biopb release that carries #1388 (after 0.16.0), the control's mode is
+`BIOPB_CONTROL_AUTH` and not its bind. This app sets `token`: one token, which views
+data and also authorizes the dashboard's chat pane and the session's `/mcp`. Before
+that, the control proxied chat only when loopback-bound, so on this app (control on
+`0.0.0.0`, as the portal proxy needs) the chat pane was hidden while `/mcp` was
+already served; the two now follow one rule.
+
+The accepted trade is the plaintext hop: portal to node is HTTP, so the token crosses
+the cluster network in the clear, and a holder of it can run code in the user's
+session through `/mcp` (and so already could read the provider key file that chat
+uses). Chat adds no capability to that. The control prints a warning about it at
+startup on a non-loopback bind; it is expected. Two ways to narrow it, neither used:
+`BIOPB_CONTROL_HIDE=chat,mcp` removes both routes, and `BIOPB_CONTROL_AUTH=split`
+with `BIOPB_CONTROL_EXEC_TOKEN` makes the access token view-only (the chat pane's
+composer is then disabled for it). The `tunnel` branch avoids the hop altogether.
+
+The mode is pinned rather than inferred because the presence of
+`BIOPB_CONTROL_EXEC_TOKEN` alone selects `split`. Checked against the dev tree: with
+no pin that variable switches modes silently; with the pin it stops the launch with
+`--auth token takes no exec token`.
