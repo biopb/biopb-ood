@@ -13,7 +13,12 @@
 set -euo pipefail
 
 STAGED_ROOT="${PWD}"
-CONFIG_FILE="${STAGED_ROOT}/biopb.json"
+# The user's own biopb.json, where biopb looks by default (BIOPB_CONFIG_HOME is
+# its documented override; biopb 0.14+ ignores XDG_CONFIG_HOME). Not generated per
+# launch: the admin page's PUT /api/config writes this same file, so what the user
+# saves there is what the next launch serves. Everything the launch form used to
+# decide (data directory, cache size, watching) now lives in it.
+CONFIG_FILE="${BIOPB_CONFIG_HOME:-${HOME}/.config/biopb}/biopb.json"
 
 # --- optional per-user dev override ---------------------------------------- #
 #
@@ -65,11 +70,15 @@ export PATH="${BIOPB_BIN_DIR}:${PATH}"
 # wherever the scheduler puts the job, instead of being re-minted per session and
 # breaking every client's TOFU pin (biopb/biopb#913).
 #
-# What is still passed explicitly, and must stay that way: --config (the staged
-# biopb.json this script writes, so the launch form is the only thing that
-# decides the data directory) and --static-dir (the bundle captured above). Those
-# two are what keep a user's leftover ~/.config/biopb or ~/.local/share/biopb
-# from changing how a session behaves.
+# What is still passed explicitly: --config (the same ~/.config/biopb/biopb.json
+# biopb would find on its own; passed so the launcher and the admin page cannot
+# disagree about which file) and --static-dir (the bundle captured above, so a
+# leftover ~/.local/share/biopb/webapp cannot change which UI a session serves).
+#
+# What the config file does NOT decide, because the control passes it on the
+# command line and the flag wins: server.host and server.port. A user who saves a
+# different port in the admin page changes the file and nothing else, so the
+# session card's address stays right.
 #
 # The one thing this gives up: the data plane's log lands in
 # ~/.local/state/biopb/logs on NFS home rather than node-local disk. Passed
@@ -80,42 +89,38 @@ export PATH="${BIOPB_BIN_DIR}:${PATH}"
 # change: at --log-level INFO with a single server per user the volume is
 # small, and that move is its own decision, not a side effect of this one.
 
-# The transcode cache goes on node-local disk, not NFS home: it is written
-# constantly, it is worthless after the job ends, and the file backend takes a
-# cross-process lock that two sessions sharing a directory would contend on.
+# The transcode cache. The config does not name a directory unless the user adds
+# one, and then biopb uses $TMPDIR (else /tmp)/biopb-cache-<uid>: node-local, which
+# is where it belongs -- it is written constantly, it is worthless after the job
+# ends, and the file backend takes a cross-process lock that NFS would make slow.
+# This script no longer sets it, so SESSION_TMP below is only for the scientific
+# stack's caches and Jupyter's runtime dir.
 SESSION_TMP="${TMPDIR:-/tmp}/biopb-ood-${SLURM_JOB_ID:-$$}"
-CACHE_DIR="${SESSION_TMP}/cache"
-# biopb itself does not read XDG_CACHE_HOME — this is for the scientific stack
+# biopb itself does not read XDG_CACHE_HOME -- this is for the scientific stack
 # underneath it (font/JIT/plugin caches), which otherwise lands in NFS home and
 # is written by every concurrent session on the cluster at once. It is an XDG
-# name because its audience is matplotlib/numba/Qt, not biopb — biopb's own dirs
+# name because its audience is matplotlib/numba/Qt, not biopb -- biopb's own dirs
 # are BIOPB_* and are deliberately left alone above.
 export XDG_CACHE_HOME="${SESSION_TMP}/xdg-cache"
-mkdir -p "${CACHE_DIR}" "${XDG_CACHE_HOME}"
+mkdir -p "${XDG_CACHE_HOME}"
 
-# The cache is written constantly, so it belongs on a real local disk. /tmp is
-# usually one but not always: some sites mount it as RAM (the cache then eats the
-# job's memory) or on network storage, and some keep it small. Warn rather than
-# fail -- the session works either way, just slower or until the disk fills.
-# Best effort: a df that cannot answer says nothing.
-cache_want_gb=<%= context.cache_gb.to_s[/\A\d+\z/].to_i %>
-if cache_df="$(df -P -T -k "${CACHE_DIR}" 2>/dev/null | tail -n 1)" && [[ -n "${cache_df}" ]]; then
+# Warn when the default cache location is not a local disk. /tmp is usually one
+# but not always: some sites mount it as RAM (the cache then eats the job's
+# memory) or on network storage. Warn rather than fail -- the session works either
+# way, just slower. Checks the default location only; a file_cache_dir the user
+# set in biopb.json is theirs to have chosen. Best effort: a df that cannot
+# answer says nothing.
+CACHE_PROBE="${TMPDIR:-/tmp}"
+if cache_df="$(df -P -T -k "${CACHE_PROBE}" 2>/dev/null | tail -n 1)" && [[ -n "${cache_df}" ]]; then
   read -r _ cache_fstype _ _ cache_avail_kb _ <<<"${cache_df}"
   case "${cache_fstype}" in
     tmpfs|ramfs)
-      echo "WARNING: the cache directory ${CACHE_DIR} is on ${cache_fstype} (RAM), so the cache" >&2
+      echo "WARNING: ${CACHE_PROBE} is on ${cache_fstype} (RAM), so the default cache directory" >&2
       echo "         counts against this job's memory. Set TMPDIR to a local disk, if the node has one." >&2 ;;
     nfs*|lustre|gpfs|beegfs|panfs|ceph|cifs|smb*|fuse*)
-      echo "WARNING: the cache directory ${CACHE_DIR} is on ${cache_fstype}, not a local disk." >&2
-      echo "         The cache is written constantly and will be slow there. Set TMPDIR to a local" >&2
-      echo "         disk, if the node has one." >&2 ;;
+      echo "WARNING: ${CACHE_PROBE} is on ${cache_fstype}, not a local disk, so the default cache" >&2
+      echo "         directory will be slow. Set TMPDIR to a local disk, if the node has one." >&2 ;;
   esac
-  if [[ "${cache_avail_kb}" =~ ^[0-9]+$ ]] \
-      && (( cache_avail_kb < cache_want_gb * 1024 * 1024 )); then
-    echo "WARNING: ${CACHE_DIR} has $(( cache_avail_kb / 1024 / 1024 )) GB free, less than the ${cache_want_gb} GB" >&2
-    echo "         cache size you asked for. The cache will fill the disk before it reaches its" >&2
-    echo "         limit; lower the cache size in the launch form." >&2
-  fi
 fi
 
 # Jupyter's runtime dir holds the session kernel's connection file, whose key is
@@ -194,48 +199,24 @@ else
   flight_desc="127.0.0.1:${grpc_port}  (loopback; reach it with ssh -L)"
 fi
 
-# The persistent catalog (hand-drawn ROIs, decode-rate measurements) gets a fixed
-# file. biopb otherwise names it by a digest of this config's path, and this
-# config lives in the per-launch session directory, so every launch would open a
-# new catalog and lose the last one's ROIs. Next to the token, which has the same
-# lifetime: the user's, across launches. DuckDB holds an exclusive lock on it, so
-# the one-session guard in before.sh.erb is what keeps two sessions off it. It is
-# deliberately under $HOME and not SESSION_TMP: that is node-local and deleted when
-# the job ends, which would throw the catalog away with it.
-# before.sh.erb computes the same directory but does not export it.
-CATALOG_FILE="${BIOPB_OOD_STATE_DIR:-${HOME}/.local/state/biopb-ood}/catalog.duckdb"
-mkdir -p "$(dirname "${CATALOG_FILE}")"
-
-# `server.port` is how the released control tells its data-plane child which
-# Flight port to bind; newer builds pass it explicitly and ignore this. Setting
-# it is correct either way.
-cat > "${CONFIG_FILE}" <<JSON
-{
-  "server": {
-    "host": "${grpc_bind}",
-    "port": ${grpc_port},
-    "aggressive_dir_pruning": true
-  },
-  "cache": {
-    "backend": "file",
-    "file_cache_dir": "${CACHE_DIR}",
-    "file_max_total_gb": <%= context.cache_gb %>
-  },
-  "catalog": {
-    "persist": true,
-    "store_path": "${CATALOG_FILE}"
-  },
-  "sources": [
-    {
-      "url": "<%= context.user_data_dir %>",
-      "monitor": <%= context.monitor_sources %>
-    }
-  ]
-}
-JSON
+# A first launch on an account that never ran the biopb installer has no config.
+# Seed the smallest valid one (nothing indexed yet; add sources in the admin page)
+# rather than failing. An existing file is never touched.
+#
+# The persistent catalog (hand-drawn ROIs, decode-rate measurements) needs no
+# setting: biopb names it by a digest of this config's path, and the path is now
+# the same on every launch, so the same catalog is reopened each time. It lives in
+# ~/.local/state/biopb/catalogs, in home and not node-local, so it follows the
+# user across nodes. DuckDB holds an exclusive lock on it; the one-session guard
+# in before.sh.erb is what keeps two sessions off it.
+if [[ ! -e "${CONFIG_FILE}" ]]; then
+  mkdir -p "$(dirname "${CONFIG_FILE}")"
+  printf '{\n  "server": {"aggressive_dir_pruning": true},\n  "sources": []\n}\n' > "${CONFIG_FILE}"
+  echo "Note: no ${CONFIG_FILE} yet; wrote an empty one. Add data sources in the admin page." >&2
+fi
 
 echo "BioPB session starting on $(hostname)"
-echo "  data directory : <%= context.user_data_dir %>"
+echo "  config         : ${CONFIG_FILE}"
 echo "  control (UI)   : 0.0.0.0:${control_port}  (portal proxy target)"
 echo "  published at   : ${url_prefix}/"
 echo "  HTTP sidecar   : 127.0.0.1:${sidecar_port}"
@@ -315,6 +296,11 @@ fi
 # loopback default when flight_remote is false, so passing it is a no-op in
 # that case. Passed unconditionally, gated only by the biopb version this app
 # is paired with (see INSTALL.md), not by a runtime capability probe.
+# Where the data plane's log ends right now, so the readiness gate below reads only
+# what this launch wrote. The file is shared with every earlier launch.
+SERVER_LOG="${BIOPB_STATE}/logs/tensor-server.log"
+SERVER_LOG_START="$(stat -c %s "${SERVER_LOG}" 2>/dev/null || echo 0)"
+
 biopb-control run \
   --config "${CONFIG_FILE}" \
   --static-dir "${WEBAPP_DIR}" \
@@ -366,6 +352,55 @@ CONTROL_PID=$!
 #
 # The 15-minute budget dates from that case and is kept as a generous ceiling.
 # Timing out is not fatal — the session stays up.
+# The one startup failure that is the user's to fix and looks like a hang from the
+# portal: another process already holds the persistent catalog. biopb opens it
+# exclusively, and the file is in NFS home, so the holder can be on ANY node -- a
+# control the installer started, `biopb control start`, or an agent session. The
+# data plane logs it and exits, the control stays up, and without this the session
+# card goes live on a UI with no data plane behind it.
+#
+# Nothing on disk says which node. control.json has a port and a pid but no node,
+# and it is no help here anyway: this launch's own control has just overwritten it.
+# So the hint is the user's other Slurm jobs, which is where an interactive biopb
+# is usually running; a login node, which Slurm does not list, is the other likely
+# place.
+catalog_lock_failure () {
+  local new_log
+  [[ -r "${SERVER_LOG}" ]] || return 1
+  if [[ "$(stat -c %s "${SERVER_LOG}" 2>/dev/null || echo 0)" -ge "${SERVER_LOG_START}" ]]; then
+    new_log="$(tail -c "+$(( SERVER_LOG_START + 1 ))" "${SERVER_LOG}" 2>/dev/null || true)"
+  else
+    new_log="$(cat "${SERVER_LOG}" 2>/dev/null || true)"   # rotated since the snapshot
+  fi
+  # Two locks, same cause. The catalog is in NFS home, so its holder can be on any
+  # node. The default cache directory is node-local, so its lock only collides with
+  # a biopb on THIS node, and is hit first when there is one.
+  local what
+  if grep -q 'Could not set lock on file\|Could not open the catalog' <<<"${new_log}"; then
+    what="catalog : $(grep -o '/[^" ]*\.duckdb' <<<"${new_log}" | head -n 1)"
+  elif grep -q 'Cannot acquire cache lock' <<<"${new_log}"; then
+    what="cache   : $(grep -o '/[^ ]*/lock' <<<"${new_log}" | head -n 1)  (so it is on THIS node)"
+  else
+    return 1
+  fi
+  {
+    echo "ERROR: another biopb process is already running from this account, so the data"
+    echo "       plane cannot start."
+    echo "         ${what}"
+    echo "         config  : ${CONFIG_FILE}"
+    echo "       The catalog is named after the config file, so any biopb run from that same"
+    echo "       config -- the one the biopb installer starts, \`biopb control start\`, or an"
+    echo "       agent session -- opens the same one, and only one process can. It may be on"
+    echo "       another node: the file is in your home directory."
+    echo "       Find it and stop it, then relaunch:"
+    echo "         - on the node where it runs:  biopb control stop     (\`biopb control status\` shows it)"
+    echo "         - your other Slurm jobs, any of which could be hosting it:"
+    squeue -h -u "${USER}" -o '           %i  %j  on %N' 2>/dev/null | awk -v me="${SLURM_JOB_ID:-0}" '$1 != me' || true
+    echo "         - a login node is not in that list; check it too."
+  } >&2
+  return 0
+}
+
 echo "Waiting for the data plane (normally seconds; up to 15 minutes)"
 READY=0
 for attempt in $(seq 1 450); do
@@ -380,6 +415,11 @@ for attempt in $(seq 1 450); do
   if [[ "${code}" == "200" ]]; then
     READY=1
     break
+  fi
+  if catalog_lock_failure; then
+    kill "${CONTROL_PID}" 2>/dev/null || true
+    wait "${CONTROL_PID}" 2>/dev/null || true
+    exit 1
   fi
   # A line a minute rather than 450 dots, and it names the last status: 503 is
   # "still scanning", anything else (000, 502) is "the sidecar is not answering
@@ -485,14 +525,44 @@ if [[ "${jupyter_enabled:-false}" == "true" ]]; then
       lab_extra+=("--ServerApp.terminado_settings={'shell_command': ['/bin/bash', '${STAGED_ROOT}/terminal-shell.sh']}")
     fi
 
-    exec "${jupyter_bin}" --no-browser \
-      --ServerApp.ip=0.0.0.0 \
-      --ServerApp.port="${jupyter_port}" --ServerApp.port_retries=0 \
-      --ServerApp.base_url="${jupyter_prefix}" \
-      --ServerApp.allow_remote_access=True \
-      --ServerApp.root_dir="${HOME}" \
-      --MultiKernelManager.default_kernel_name=biopb-session \
-      "${lab_extra[@]}"
+    # Kept running for as long as the session is. The control, the data plane and
+    # the biopb session last days, but a site's Jupyter config can shut the Lab
+    # down on its own ("No kernels for N seconds; shutting down" -- an Ansible-managed
+    # /etc/jupyter/jupyter_server_config.py does, after 2 h), and nothing else would
+    # bring it back: the card's link would point at a dead port for the rest of the
+    # job. Relaunching on the same port, prefix and token keeps that link valid; the
+    # user reloads the tab. Nothing is lost by it -- a notebook's kernel only relays
+    # to the session, which is the control's and does not restart with the Lab.
+    #
+    # Not `exec`: this subshell is LAB_PID and has to outlive each Lab, and cleanup
+    # signals it, not the Lab. The TERM trap passes the signal on, or the Lab would
+    # be left running after the job's script exits.
+    lab_child=""
+    trap 'if [[ -n "${lab_child}" ]]; then kill "${lab_child}" 2>/dev/null || true; fi; exit 0' TERM INT
+    lab_quick_exits=0
+    while :; do
+      lab_started=${SECONDS}
+      "${jupyter_bin}" --no-browser \
+        --ServerApp.ip=0.0.0.0 \
+        --ServerApp.port="${jupyter_port}" --ServerApp.port_retries=0 \
+        --ServerApp.base_url="${jupyter_prefix}" \
+        --ServerApp.allow_remote_access=True \
+        --ServerApp.root_dir="${HOME}" \
+        --MultiKernelManager.default_kernel_name=biopb-session \
+        "${lab_extra[@]}" &
+      lab_child=$!
+      wait "${lab_child}" || true
+      lab_child=""
+      # A Lab that dies at once (a bad option, the port taken) would otherwise be
+      # relaunched forever; after three in a row it is not going to start.
+      if (( SECONDS - lab_started < 30 )); then lab_quick_exits=$(( lab_quick_exits + 1 )); else lab_quick_exits=0; fi
+      if (( lab_quick_exits >= 3 )); then
+        echo "--- JupyterLab exited three times within 30 s of starting; not restarting it."
+        exit 1
+      fi
+      echo "--- JupyterLab exited after $(( SECONDS - lab_started )) s; starting it again in 2 s ($(date '+%F %T'))"
+      sleep 2
+    done
   ) > "${STAGED_ROOT}/jupyter.log" 2>&1 &
   LAB_PID=$!
 

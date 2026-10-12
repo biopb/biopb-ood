@@ -184,15 +184,46 @@ you, carrying freshness in `full_scan_in_progress` and
 `last_full_scan_finished_at`; a client needing a complete catalog waits on those
 fields, not on `SERVING`.
 
-**Before biopb 0.16 the launch form decided which you got.** "Watch the data
-directory" on reached `SERVING` immediately with the catalog filling in behind
-it; off walked the whole tree before binding anything, so the first 200 carried a
-complete catalog at the cost of a launch that could take minutes on a large tree.
-From 0.16 a directory that is not watched (`monitor` false, a "scan-once" root) is
-registered progressively too, so both settings bind at once and the field only
-decides whether the directory is walked again afterwards. A watched directory
-re-stats every file under it on every pass, which is why it is no longer the
-default: upstream says to watch directories "of a sane size, not a whole archive".
+**Before biopb 0.16 the `monitor` setting decided which you got.** On reached
+`SERVING` immediately with the catalog filling in behind it; off walked the whole
+tree before binding anything, so the first 200 carried a complete catalog at the
+cost of a launch that could take minutes on a large tree. From 0.16 a directory
+that is not watched (`monitor` false, a "scan-once" root) is registered
+progressively too, so both settings bind at once and the setting only decides
+whether the directory is walked again afterwards. A watched directory re-stats
+every file under it on every pass, which is why it is not the default: upstream
+says to watch directories "of a sane size, not a whole archive".
+
+**The launch form no longer writes the config.** It used to generate a
+`biopb.json` in the job's staged directory on every launch, from three form fields
+(data directory, cache size, watch). The admin page's `PUT /api/config` writes the
+file the data plane was started with, so anything saved there was lost on the next
+launch, and the two could not both be the source of truth. The launcher now passes
+`--config ~/.config/biopb/biopb.json`, the file biopb reads by default, and the
+admin page edits it; the three fields are gone. Two things follow.
+
+- *The ports cannot drift.* The control builds the data plane's `--host` and
+  `--port` from its own arguments on every spawn, and the flags win over
+  `server.host`/`server.port` in the file. Checked against a running control:
+  restart, stop and restart-from-stopped, including after a save that changed
+  both keys, all kept the same gRPC port. The session card's address stays right.
+- *The catalog needs no setting.* biopb names the persistent catalog by a digest
+  of the config path; that path is now stable, so the old fixed `store_path` is
+  redundant and was removed.
+
+**A biopb started outside OnDemand blocks the launch, and the one-session guard
+cannot see it.** The guard counts the user's `biopb-ood` Slurm jobs. Everything
+else that opens the same `biopb.json` (the installer's control, `biopb control
+start`, an agent session) opens the same catalog, and DuckDB allows one holder
+across NFS, so the data plane exits at the catalog step while the control stays
+up. The control's record (`control.json`) has no node name, and the launching
+control overwrites it anyway, so the holder cannot be located from disk.
+`script.sh.erb` therefore reads this launch's slice of the data-plane log in the
+readiness gate (it records the log's size before starting) and, on a catalog or
+cache lock failure, says what is locked, lists the user's other Slurm jobs as
+likely hosts, and exits instead of leaving a card pointing at a dead data plane.
+The cache lock is the same-node case: the default cache directory is node-local,
+so it only collides with a biopb on the same node, and is hit before the catalog.
 
 `script.sh.erb` still allows 15 minutes, from the days of the long walk, and logs
 a line a minute with the last status. Timing out is not fatal. A cold start on a
@@ -230,7 +261,7 @@ back from biopb's own `~/.local/state/biopb/tensor-server.token` — biopb write
 that file on serve and *removes* it on a clean stop, so reading it back would
 hand out a fresh token after every tidy shutdown.
 
-What this gives up is two concurrent sessions with different data directories or
+What this gives up is two concurrent sessions with different data sources or
 different resource shapes. For a single-user session that is a thin use case, and it
 buys away the whole class of shared-state problems above.
 
@@ -359,3 +390,17 @@ Since then work has landed on `main` directly, through pull requests. As of
 2026-10-10 the `dev` branch is entirely contained in `main` (24 commits behind,
 none ahead) and is a leftover, not a variant; `tunnel` is the only branch that is
 a different deployment.
+
+## JupyterLab is relaunched when it exits
+
+`script.sh.erb` runs JupyterLab in a loop, so it comes back on the same port, base
+URL and token if it exits. The control, data plane and biopb session last as long
+as the job (days), but a site's Jupyter config can shut the Lab down by itself: an
+Ansible-managed `/etc/jupyter/jupyter_server_config.py` here culls idle kernels and
+stops the server after two hours without activity ("No kernels for N seconds;
+shutting down", seen in a past job's `jupyter.log`). Without the loop the card's
+link would point at a dead port for the rest of the job. After a restart the user
+reloads the tab; nothing is lost, because a notebook's kernel only relays to the
+session, which belongs to the control. Three exits within 30 s of starting in a row
+stop the loop (a bad option, the port taken); the reason is in `jupyter.log`. This
+works around the site's idle policy rather than changing it.
