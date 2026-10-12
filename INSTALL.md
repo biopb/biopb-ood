@@ -41,24 +41,45 @@ route is absent, `302` when it exists and merely wants a login.
 **RUN ON A JOB NODE, NOT ON A SUBMISSION NODE**
 
 ```sh
-curl -sSfL https://biopb.org/install.sh | bash
+curl -sSfL https://biopb.org/install.sh | \
+  BIOPB_INSTALL_NAPARI=0 BIOPB_NO_SERVER_START=1 BIOPB_NONINTERACTIVE=1 bash
 ```
 
-This is what biopb documents for its users. It fetches the current release
-bundle and sets up `~/.local` — CLI, control plane, tensor server, and the web
-bundle. It also does more than this app needs:
+This is the installer biopb documents for its users. It fetches the release
+bundle and sets up `~/.local`: CLI, control plane, tensor server, the web bundle
+and the Jupyter kernels. The three variables cut it down to what this app wants:
 
-- It installs napari with its extras and Qt, a large desktop stack that a compute
-  node session never uses.
+- `BIOPB_INSTALL_NAPARI=0` skips napari and its Qt stack, a large desktop stack
+  that a compute node session never uses. `biopb-mcp` is installed without the
+  viewer. **Needs an installer newer than 0.16.0**: the switch is
+  biopb/biopb#1389, merged after that release, and the copy served with 0.16.0
+  ignores it and installs napari anyway. The installer prints
+  `napari skipped: BIOPB_INSTALL_NAPARI=0` when it took effect.
+- `BIOPB_NO_SERVER_START=1` stops the installer's last step, which otherwise
+  **starts a control plane and data plane** on the machine you ran it on. That
+  server opens `~/.config/biopb/biopb.json` and so the same catalog this app
+  does, and DuckDB allows one holder over NFS: a session launched while it is
+  running stops with an error naming the lock. If you forget the variable, stop
+  it with `biopb control stop` on that node before the first launch.
+- `BIOPB_NONINTERACTIVE=1` suppresses every prompt, including the offer to
+  install an AI agent (opencode).
+
+It still does two things you may not want, and neither has a switch:
+
 - It registers biopb-mcp with every AI agent it detects (Claude Code included),
   **rewriting that agent's configuration**.
+- On a first install it writes `~/.config/biopb/biopb.json` (a sample-image
+  bundle) and `mcp.json`. This app serves that same `biopb.json`: edit it in the
+  dashboard's admin page. An existing config is kept.
 
-If you do not want either, install the release wheels yourself instead, as in
-[B.1](#1-install-biopb-once-shared) but into `~/.local` (for example with
+If the agent rewrite is a problem, install the release wheels yourself instead,
+as in [B.1](#1-install-biopb-once-shared) but into `~/.local` (for example with
 `uv tool install`). The app needs only `biopb`, `biopb-tensor-server`,
 `biopb-control` and the web bundle. Include the `tls` extra on
 `biopb-tensor-server` if you want remote Arrow Flight; without it the session
-falls back to loopback Flight.
+falls back to loopback Flight. The installer's `biopb-session` kernel is what
+JupyterLab uses for the notebook that shares the session; the wheel route does not
+write it.
 
 #### Verify
 
