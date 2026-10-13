@@ -256,6 +256,21 @@ fi
 export BIOPB_CONTROL_HOST=0.0.0.0
 export BIOPB_TENSOR_TOKEN="${biopb_token}"
 
+# How this control is authenticated. biopb 0.16 builds after #1388 take it from this
+# variable instead of inferring "loopback or not" from the bind; earlier builds
+# ignore it. `token` is one token for everything: it views data AND, because it
+# rides over this app's plaintext portal-to-node hop, is also what lets a holder use
+# the dashboard's chat pane and the session's /mcp (code in the kernel). That is the
+# accepted trade (see DESIGN-NOTES.md), and the control logs a warning about it at
+# startup on a non-loopback bind: expected here, not a fault.
+#
+# Pinned, not left to inference, because biopb infers `split` (a second, exec token)
+# from the mere presence of BIOPB_CONTROL_EXEC_TOKEN in the environment. A stray one
+# would then silently turn chat and kernel controls off in the dashboard. Pinned,
+# the same stray value stops the launch with "--auth token takes no exec token",
+# which names the cause. Unset it, or change this line to `split` on purpose.
+export BIOPB_CONTROL_AUTH=token
+
 # Tell every biopb process started from this environment -- the session, and
 # whatever Lab's terminals launch -- where the control is. This control is a
 # foreground `biopb-control run` on an unconventional port, so it publishes
